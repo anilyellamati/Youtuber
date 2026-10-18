@@ -88,6 +88,7 @@ class ScreenRecService : LifecycleService() {
             @Suppress("DEPRECATION")
             val data: Intent = intent.getParcelableExtra(EXTRA_DATA)!!
             val proj = mpm.getMediaProjection(intent.getIntExtra(EXTRA_RESULT_CODE, 0), data)
+                ?: throw IllegalStateException("screen capture permission expired")
             projection = proj
             proj.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
