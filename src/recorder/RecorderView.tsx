@@ -362,7 +362,7 @@ export function RecorderView() {
             </button>
           </div>
           <div className="engine-tag" title="Capture engine and encoder">
-            {engine === "mobile" ? "Phone · MediaProjection" : engine === "native" ? `Native · ${ENCODER_LABELS[encoder] ?? encoder}` : "Web · hardware MediaRecorder"}
+            {engine === "mobile" ? "Phone · MediaProjection" : engine === "native" ? (app.encoders.length ? `Native · ${ENCODER_LABELS[encoder] ?? encoder}` : "Native · detecting GPU encoder…") : "Web · hardware MediaRecorder"}
           </div>
         </div>
 

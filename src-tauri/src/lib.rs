@@ -26,6 +26,8 @@ pub fn run() {
             ffmpeg::screen_permission,
             ffmpeg::probe_media,
             media::media_base,
+            media::selftest_target,
+            media::selftest_log,
             media::screen_snapshot,
             files::default_output_dir,
             files::save_chunk,

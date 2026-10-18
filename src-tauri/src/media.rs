@@ -31,7 +31,7 @@ pub fn start() {
 
 /// Base URL; the UI requests `{base}/f?p=<url-encoded absolute path>`.
 #[tauri::command]
-pub fn media_base() -> Option<String> {
+pub async fn media_base() -> Option<String> {
     BASE.get().cloned()
 }
 
@@ -171,4 +171,19 @@ pub async fn screen_snapshot(app: tauri::AppHandle, display: u32) -> Result<Stri
         }
     }
     Ok(out_s)
+}
+
+/// Developer self-test hook: `SF_SELFTEST=<video path>` makes the UI run media
+/// loading checks and print results here instead of starting normally.
+#[tauri::command]
+pub async fn selftest_target() -> Option<String> {
+    std::env::var("SF_SELFTEST").ok()
+}
+
+#[tauri::command]
+pub fn selftest_log(line: String) {
+    eprintln!("[selftest] {line}");
+    if line == "DONE" {
+        std::process::exit(0);
+    }
 }

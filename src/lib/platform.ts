@@ -24,7 +24,12 @@ let mediaBase: string | null = null;
 
 /** Called once at startup: the desktop app serves local media over http://127.0.0.1. */
 export async function initMedia() {
-  if (isTauri) mediaBase = await tauriInvoke<string | null>("media_base").catch(() => null);
+  if (!isTauri) return;
+  // Retry: on a first launch macOS permission prompts can delay the first IPC calls.
+  for (let i = 0; i < 40 && !mediaBase; i++) {
+    mediaBase = await tauriInvoke<string | null>("media_base").catch(() => null);
+    if (!mediaBase) await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
 /** URL a <video>/<img> can load for a local file path (or passthrough for blob: urls). */
