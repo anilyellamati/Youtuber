@@ -1,0 +1,16 @@
+{
+  "identifier": "mobile",
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "android",
+    "iOS"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "opener:default",
+    "screenrec:default"
+  ]
+}

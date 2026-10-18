@@ -1,0 +1,38 @@
+mod ffmpeg;
+mod files;
+mod youtube;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_screenrec::init());
+    builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .manage(ffmpeg::Jobs::default())
+        .invoke_handler(tauri::generate_handler![
+            ffmpeg::ffmpeg_info,
+            ffmpeg::ffmpeg_list_devices,
+            ffmpeg::ffmpeg_probe_encoders,
+            ffmpeg::ffmpeg_start,
+            ffmpeg::ffmpeg_stop,
+            ffmpeg::ffmpeg_run,
+            ffmpeg::ffmpeg_analyze,
+            ffmpeg::probe_media,
+            files::default_output_dir,
+            files::save_chunk,
+            files::path_exists,
+            files::list_videos,
+            files::delete_temp_files,
+            files::reveal_in_folder,
+            youtube::yt_login,
+            youtube::yt_status,
+            youtube::yt_logout,
+            youtube::yt_upload,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running StreamForge");
+}

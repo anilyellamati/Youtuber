@@ -1,0 +1,190 @@
+name: Build StreamForge
+
+# Builds every target on push to main / tags, and publishes installers to a
+# GitHub release for tags like v1.2.3.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SF_GOOGLE_CLIENT_ID: ${{ secrets.SF_GOOGLE_CLIENT_ID }}
+  SF_GOOGLE_CLIENT_SECRET: ${{ secrets.SF_GOOGLE_CLIENT_SECRET }}
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Windows x64", os: windows-latest, target: x86_64-pc-windows-msvc, bundles: "nsis,msi" }
+          - { name: "Windows x86 (32-bit)", os: windows-latest, target: i686-pc-windows-msvc, bundles: "nsis" }
+          - { name: "macOS Apple Silicon", os: macos-14, target: aarch64-apple-darwin, bundles: "app,dmg" }
+          - { name: "macOS Intel", os: macos-13, target: x86_64-apple-darwin, bundles: "app,dmg" }
+          - { name: "Linux x64", os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage" }
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - name: Linux system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - run: npm ci
+
+      - name: Fetch static FFmpeg sidecar
+        shell: bash
+        env:
+          FFMPEG_URL_I686: ${{ vars.FFMPEG_URL_I686 }}
+        run: node scripts/fetch-ffmpeg.mjs ${{ matrix.target }}
+
+      - name: Configure sidecar
+        id: sidecar
+        shell: bash
+        run: |
+          if ls src-tauri/bin/ffmpeg-${{ matrix.target }}* >/dev/null 2>&1; then
+            echo 'config={"bundle":{"externalBin":["bin/ffmpeg"]}}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'config={}' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional code signing (leave unset for unsigned builds)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config '${{ steps.sidecar.outputs.config }}'
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: StreamForge ${{ github.ref_name }}
+          releaseDraft: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StreamForge-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+
+  android:
+    name: Android (APK + AAB)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: sdkmanager "ndk;27.0.12077973"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: android
+      - run: npm ci
+      - name: Build
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+        run: |
+          npx tauri android init --ci
+          npx tauri android build --apk --ci
+      - name: Sign APK
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          # Uses your keystore when the secrets are set; otherwise a throwaway test key
+          # (fine for sideloading, not for Play Store updates).
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > release.jks
+            PASS="$KEYSTORE_PASSWORD"
+          else
+            PASS=streamforge
+            keytool -genkeypair -v -keystore release.jks -alias streamforge -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PASS" -keypass "$PASS" -dname "CN=StreamForge"
+          fi
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -1)
+          mkdir -p out
+          "$BT/zipalign" -f 4 "$APK" out/aligned.apk
+          "$BT/apksigner" sign --ks release.jks --ks-pass "pass:$PASS" --out out/StreamForge-android.apk out/aligned.apk
+          rm out/aligned.apk
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/StreamForge-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StreamForge-android
+          path: out/StreamForge-android.apk
+
+  ios:
+    name: iOS (needs signing secrets)
+    runs-on: macos-14
+    if: ${{ vars.IOS_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - run: npm ci
+      - name: Build
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+        run: |
+          echo "${{ secrets.APPLE_API_KEY_P8 }}" > "$APPLE_API_KEY_PATH"
+          npx tauri ios init --ci
+          npx tauri ios build --export-method app-store-connect --ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StreamForge-ios
+          path: src-tauri/gen/apple/build/**/*.ipa

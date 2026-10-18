@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>StreamForge shows your facecam over your gameplay recording.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>StreamForge records your voice commentary.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>StreamForge records your screen while you play.</string>
+</dict>
+</plist>
