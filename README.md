@@ -2,6 +2,25 @@
 
 Record your gameplay with a facecam, edit it, and publish it to YouTube with SEO-ready titles, tags, chapters and a thumbnail. Built for gaming YouTubers, and light enough for old 32-bit Windows laptops.
 
+## ⬇️ Download (v1.0.0)
+
+| Platform | Installer |
+|---|---|
+| **Windows 10/11 (64-bit)** | [StreamForge_1.0.0_x64-setup.exe](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.0/StreamForge_1.0.0_x64-setup.exe) (50 MB) · [.msi](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.0/StreamForge_1.0.0_x64_en-US.msi) |
+| **Windows (32-bit / old PCs)** | [StreamForge_1.0.0_x86-setup.exe](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.0/StreamForge_1.0.0_x86-setup.exe) (3.5 MB) |
+| **Mac with Apple Silicon (M1–M4)** | [StreamForge_1.0.0_aarch64.dmg](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.0/StreamForge_1.0.0_aarch64.dmg) (30 MB) |
+| **Mac with Intel** | [StreamForge_1.0.0_x64.dmg](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.0/StreamForge_1.0.0_x64.dmg) (35 MB) |
+| **Linux** | [.deb](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.0/StreamForge_1.0.0_amd64.deb) · [.AppImage](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.0/StreamForge_1.0.0_amd64.AppImage) |
+| **Android** | Coming soon (build in progress) |
+
+All files: [Releases → v1.0.0](https://github.com/anilyellamati/Youtuber/releases/tag/v1.0.0). The repository is private, so the links only work while you're signed in to GitHub with access.
+
+**First launch on Mac:** the app isn't notarized yet, so right-click StreamForge → **Open** → **Open**. If macOS says the app is "damaged", run `xattr -cr /Applications/StreamForge.app` in Terminal.
+
+**First launch on Windows:** SmartScreen may warn about an unknown publisher; click **More info** → **Run anyway**.
+
+## Platforms
+
 | Platform | Build | Capture engine |
 |---|---|---|
 | Windows 10/11 x64 | `.exe` (NSIS) + `.msi` | Web (WebView2): screen + **game audio** + facecam, hardware MediaRecorder. Native FFmpeg `ddagrab` (GPU desktop duplication) optional |
