@@ -14,7 +14,7 @@ const SOURCES = {
   "i686-pc-windows-msvc": process.env.FFMPEG_URL_I686 || "",
   "x86_64-apple-darwin": "https://ffmpeg.martin-riedl.de/redirect/latest/macos/amd64/release/ffmpeg.zip",
   "aarch64-apple-darwin": "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip",
-  "x86_64-unknown-linux-gnu": "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz",
+  "x86_64-unknown-linux-gnu": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz",
 };
 
 const triple = process.argv[2];
@@ -48,7 +48,8 @@ const extract = join(work, "x");
 mkdirSync(extract);
 // bsdtar (Windows, macOS) handles zip; GNU tar on Linux handles .tar.xz
 if (archive.endsWith(".zip") && process.platform === "linux") execFileSync("unzip", ["-q", archive, "-d", extract]);
-else execFileSync("tar", ["-xf", archive, "-C", extract]);
+// On Windows use the system bsdtar: Git's GNU tar misreads "C:" as a remote host
+else execFileSync(process.platform === "win32" ? "C:\\Windows\\System32\\tar.exe" : "tar", ["-xf", archive, "-C", extract]);
 
 function find(dir) {
   for (const name of readdirSync(dir)) {

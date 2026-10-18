@@ -28,7 +28,7 @@ jobs:
           - { name: "Windows x64", os: windows-latest, target: x86_64-pc-windows-msvc, bundles: "nsis,msi" }
           - { name: "Windows x86 (32-bit)", os: windows-latest, target: i686-pc-windows-msvc, bundles: "nsis" }
           - { name: "macOS Apple Silicon", os: macos-14, target: aarch64-apple-darwin, bundles: "app,dmg" }
-          - { name: "macOS Intel", os: macos-13, target: x86_64-apple-darwin, bundles: "app,dmg" }
+          - { name: "macOS Intel", os: macos-15-intel, target: x86_64-apple-darwin, bundles: "app,dmg" }
           - { name: "Linux x64", os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage" }
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -76,13 +76,9 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional code signing (leave unset for unsigned builds)
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # For signed + notarized macOS builds add APPLE_CERTIFICATE,
+          # APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_ID,
+          # APPLE_PASSWORD and APPLE_TEAM_ID here (empty values break the build).
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config '${{ steps.sidecar.outputs.config }}'
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
@@ -114,7 +110,9 @@ jobs:
           java-version: 17
       - uses: android-actions/setup-android@v3
       - name: Install NDK
-        run: sdkmanager "ndk;27.0.12077973"
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          yes | sdkmanager --install "ndk;27.0.12077973" > /dev/null
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
