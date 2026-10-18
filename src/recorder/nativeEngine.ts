@@ -183,6 +183,9 @@ export class NativeRecording {
   private accumulated = 0;
   private exitWaiters = new Map<string, (r: { code: number | null; log: string }) => void>();
   private unlisten: (() => void) | null = null;
+  private unlistenProgress: (() => void) | null = null;
+  private lastFrameAt = 0;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
   markers: { time: number; label: string }[] = [];
   paused = false;
   lastError = "";
@@ -196,12 +199,38 @@ export class NativeRecording {
       if (w) {
         this.exitWaiters.delete(e.id);
         w(e);
-      } else if (e.id === this.jobId && e.code !== 0) {
+      } else if (e.id === this.jobId && e.code !== 0 && this.watchdog) {
+        this.dispose();
         this.lastError = e.log;
         this.onFatal?.(e.log);
       }
     });
+    // Watchdog: a capture device that never delivers frames (usually a missing
+    // Screen Recording / Camera permission) must not silently produce a broken file.
+    this.unlistenProgress = await listen<{ id: string; frame: number }>("ffmpeg://progress", (e) => {
+      if (e.id === this.jobId && e.frame > 0) this.lastFrameAt = performance.now();
+    });
+    this.watchdog = setInterval(() => {
+      if (this.paused) return;
+      const since = performance.now() - Math.max(this.lastFrameAt, this.segStart);
+      if (since > 8000) {
+        this.dispose();
+        void invoke("ffmpeg_stop", { id: this.jobId });
+        this.onFatal?.(
+          this.lastFrameAt
+            ? "The capture stopped delivering video. Check that the camera or screen is still available."
+            : "No video is arriving from the screen or camera. Allow StreamForge under System Settings → Privacy & Security → Screen Recording and Camera, then restart StreamForge.",
+        );
+      }
+    }, 1000);
     await this.startSegment();
+  }
+
+  private dispose() {
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
+    this.unlistenProgress?.();
+    this.unlistenProgress = null;
   }
 
   private async startSegment() {
@@ -211,6 +240,7 @@ export class NativeRecording {
     const args = await buildRecordArgs(this.opts, path, this.temps);
     await invoke("ffmpeg_start", { id: this.jobId, args });
     this.segStart = performance.now();
+    this.lastFrameAt = 0;
   }
 
   private stopSegment(): Promise<{ code: number | null; log: string }> {
@@ -242,6 +272,7 @@ export class NativeRecording {
   }
 
   async stop(): Promise<{ path: string; duration: number; markers: { time: number; label: string }[] }> {
+    this.dispose();
     if (!this.paused) await this.stopSegment();
     this.paused = true;
     this.unlisten?.();

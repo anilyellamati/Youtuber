@@ -6,7 +6,7 @@ import { computeLayout, type CamFilter, type CamMode, type CamShape, type Corner
 import { useSettings, qualityPreset, resolveEngine, QUALITY_PRESETS } from "../lib/settings";
 import { useApp, recorderControls, type Marker } from "../lib/appStore";
 import { bestEncoder, ENCODER_LABELS } from "../lib/encoders";
-import { invoke, isMac, isMobile, isTauri, isWindows, joinPath, outputDir, timestampName, formatTime, downloadBlob, baseName } from "../lib/platform";
+import { fileUrl, invoke, isMac, openExternal, isMobile, isTauri, isWindows, joinPath, outputDir, timestampName, formatTime, downloadBlob, baseName } from "../lib/platform";
 import { Icon } from "../components/Icon";
 
 const MODES: { id: CamMode; label: string }[] = [
@@ -118,6 +118,40 @@ export function RecorderView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.micId, engine]);
 
+  // Native engine: show a live still of the chosen display (refreshes ~1/s while idle).
+  const recIdle = app.recState === "idle";
+  useEffect(() => {
+    if (engine !== "native" || !recIdle) return;
+    const name = native?.screens.find((d) => d.id === s.screenId)?.name ?? native?.screens[0]?.name ?? "";
+    const display = isMac ? Number(name.match(/(\d+)\s*$/)?.[1] ?? 0) + 1 : 1;
+    let stop = false;
+    let failures = 0;
+    const tick = async () => {
+      if (stop) return;
+      if (isMac && !(await invoke<boolean>("screen_permission", { request: false }).catch(() => false))) {
+        if (!stop) setTimeout(tick, 4000); // wait until the user grants Screen Recording
+        return;
+      }
+      try {
+        const path = await invoke<string>("screen_snapshot", { display });
+        const img = new Image();
+        img.src = `${fileUrl(path)}&t=${Date.now()}`;
+        await img.decode();
+        if (!stop && compRef.current) {
+          compRef.current.screenStill = Object.assign(img, { videoWidth: img.naturalWidth, videoHeight: img.naturalHeight });
+        }
+        failures = 0;
+      } catch {
+        failures++;
+      }
+      if (!stop) setTimeout(tick, failures > 3 ? 5000 : 1200);
+    };
+    void tick();
+    return () => {
+      stop = true;
+    };
+  }, [engine, recIdle, native, s.screenId]);
+
   // --- recording
   const pickScreen = async () => {
     try {
@@ -132,6 +166,12 @@ export function RecorderView() {
 
   const start = async () => {
     const comp = compRef.current!;
+    if (engine === "native" && isMac && !(await invoke<boolean>("screen_permission", { request: false }))) {
+      await invoke("screen_permission", { request: true });
+      app.toast("StreamForge needs Screen Recording permission. Turn it on in the window that opened (Privacy & Security → Screen Recording), then quit and reopen StreamForge.", "error");
+      void openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+      return;
+    }
     if (engine === "web" && !comp.hasScreen && s.layout.mode !== "camera-only" && !nativeMobile) {
       if (!(await pickScreen())) return;
     }

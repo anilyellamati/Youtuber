@@ -1,9 +1,11 @@
 mod ffmpeg;
 mod files;
+mod media;
 mod youtube;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    media::start();
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
@@ -21,7 +23,10 @@ pub fn run() {
             ffmpeg::ffmpeg_stop,
             ffmpeg::ffmpeg_run,
             ffmpeg::ffmpeg_analyze,
+            ffmpeg::screen_permission,
             ffmpeg::probe_media,
+            media::media_base,
+            media::screen_snapshot,
             files::default_output_dir,
             files::save_chunk,
             files::path_exists,

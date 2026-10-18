@@ -20,9 +20,17 @@ export function listen<T>(event: string, cb: (payload: T) => void): Promise<Unli
   return tauriListen<T>(event, (e) => cb(e.payload));
 }
 
+let mediaBase: string | null = null;
+
+/** Called once at startup: the desktop app serves local media over http://127.0.0.1. */
+export async function initMedia() {
+  if (isTauri) mediaBase = await tauriInvoke<string | null>("media_base").catch(() => null);
+}
+
 /** URL a <video>/<img> can load for a local file path (or passthrough for blob: urls). */
 export function fileUrl(path: string): string {
-  if (/^(blob:|data:|https?:)/.test(path)) return path;
+  if (/^(blob:|data:|https?:)/.test(path) || path.startsWith("/") && !isTauri) return path;
+  if (mediaBase) return `${mediaBase}/f?p=${encodeURIComponent(path)}`;
   return isTauri ? convertFileSrc(path) : path;
 }
 

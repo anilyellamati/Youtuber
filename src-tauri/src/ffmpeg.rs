@@ -216,6 +216,9 @@ pub async fn ffmpeg_start(
     args: Vec<String>,
 ) -> Result<(), String> {
     let mut full = vec!["-hide_banner".to_string(), "-y".into(), "-progress".into(), "pipe:1".into(), "-nostats".into()];
+    if !cfg!(windows) {
+        full.push("-nostdin".into());
+    }
     full.extend(args);
     let mut child: Child = command(&app)
         .args(&full)
@@ -271,18 +274,23 @@ pub async fn ffmpeg_start(
     Ok(())
 }
 
-/// Gracefully stops a job by sending `q` so the MP4 gets its index written; kills it
-/// if it has not exited within a few seconds.
+/// Gracefully stops a job so the MP4 gets finalized. On macOS/Linux this sends
+/// SIGINT: stopping via a `q` keypress on stdin was found to drop nearly every
+/// buffered frame with VideoToolbox. Windows has no SIGINT for windowless
+/// processes, so it still uses `q`. Kills the job if it hasn't exited in 8 s.
 #[tauri::command]
 pub async fn ffmpeg_stop(jobs: State<'_, Jobs>, id: String) -> Result<(), String> {
     let pid = {
         let mut map = jobs.0.lock().await;
         let Some(job) = map.get_mut(&id) else { return Ok(()) };
-        if let Some(stdin) = job.stdin.as_mut() {
-            let _ = stdin.write_all(b"q\n").await;
-            let _ = stdin.flush().await;
+        if cfg!(windows) {
+            if let Some(stdin) = job.stdin.as_mut() {
+                let _ = stdin.write_all(b"q\n").await;
+                let _ = stdin.flush().await;
+            }
+        } else if let Some(pid) = job.pid {
+            let _ = std::process::Command::new("kill").args(["-INT", &pid.to_string()]).status();
         }
-        job.stdin = None;
         job.pid
     };
     let jobs_arc = jobs.0.clone();
@@ -295,6 +303,34 @@ pub async fn ffmpeg_stop(jobs: State<'_, Jobs>, id: String) -> Result<(), String
         }
     });
     Ok(())
+}
+
+/// macOS Screen Recording permission. `request` shows the system prompt the first
+/// time (macOS then requires an app restart once granted).
+#[tauri::command]
+pub fn screen_permission(request: bool) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGPreflightScreenCaptureAccess() -> bool;
+            fn CGRequestScreenCaptureAccess() -> bool;
+        }
+        unsafe {
+            if CGPreflightScreenCaptureAccess() {
+                return true;
+            }
+            if request {
+                return CGRequestScreenCaptureAccess();
+            }
+            false
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = request;
+        true
+    }
 }
 
 fn kill_pid(pid: u32) {

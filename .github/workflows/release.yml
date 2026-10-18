@@ -159,16 +159,21 @@ jobs:
           "$BT/zipalign" -f 4 "$APK" out/aligned.apk
           "$BT/apksigner" sign --ks release.jks --ks-pass "pass:$PASS" --out out/StreamForge-android.apk out/aligned.apk
           rm out/aligned.apk
-      - name: Attach to release
-        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.release_tag != '' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
-          files: out/StreamForge-android.apk
       - uses: actions/upload-artifact@v4
         with:
           name: StreamForge-android
           path: out/StreamForge-android.apk
+      - name: Attach to release
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          VER="${TAG#v}"
+          cp out/StreamForge-android.apk "out/StreamForge_${VER}_android.apk"
+          # the desktop jobs create the release; wait for it if Android finishes first
+          for i in $(seq 1 30); do gh release view "$TAG" > /dev/null 2>&1 && break; sleep 30; done
+          gh release upload "$TAG" "out/StreamForge_${VER}_android.apk" --clobber
 
   ios:
     name: iOS (needs signing secrets)

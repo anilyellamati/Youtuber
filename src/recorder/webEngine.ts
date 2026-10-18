@@ -76,6 +76,8 @@ export class Compositor {
   level = 0;
   layout: CameraLayout;
   placeholder = true; // draw a stand-in game frame when no screen is shared (native engine preview)
+  /** Periodic snapshot of the selected display (native engine preview). */
+  screenStill: (HTMLImageElement & { videoWidth?: number; videoHeight?: number }) | null = null;
 
   constructor(public opts: WebRecorderOptions, layout: CameraLayout) {
     this.layout = layout;
@@ -185,6 +187,8 @@ export class Compositor {
     if (rects.screen) {
       if (this.screenVideo && this.screenVideo.readyState >= 2) {
         drawScreen(ctx, this.screenVideo, rects.screen, rects.screenCover);
+      } else if (this.screenStill && this.placeholder) {
+        drawScreen(ctx, this.screenStill, rects.screen, rects.screenCover);
       } else if (this.placeholder) {
         drawPlaceholder(ctx, rects.screen);
       }
