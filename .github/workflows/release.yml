@@ -133,9 +133,9 @@ jobs:
           key: android
       - run: npm ci
       - name: Build
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
         run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+          ls "$NDK_HOME/toolchains" > /dev/null
           npx tauri android init --ci
           npx tauri android build --apk --ci
       - name: Sign APK
