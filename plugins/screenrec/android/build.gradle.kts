@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.streamforge.screenrec"
-    compileSdk = 34
+    compileSdk = 36
     defaultConfig {
         minSdk = 24
         consumerProguardFiles("consumer-rules.pro")
