@@ -7,6 +7,15 @@ on:
     branches: [main]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Which builds to run"
+        type: choice
+        options: [all, desktop, android]
+        default: all
+      release_tag:
+        description: "Attach outputs to this existing release tag (optional)"
+        default: ""
 
 permissions:
   contents: write
@@ -21,6 +30,7 @@ env:
 
 jobs:
   desktop:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.only != 'android' }}
     strategy:
       fail-fast: false
       matrix:
@@ -96,7 +106,8 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
 
   android:
-    name: Android (APK + AAB)
+    name: Android (APK)
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.only != 'desktop' }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -108,11 +119,11 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
-      - name: Install NDK
+      - name: Install NDK (runner ships the Android SDK)
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          yes | sdkmanager --install "ndk;27.0.12077973" > /dev/null
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          yes | "$SDKM" --install "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0" > /dev/null
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
@@ -149,9 +160,10 @@ jobs:
           "$BT/apksigner" sign --ks release.jks --ks-pass "pass:$PASS" --out out/StreamForge-android.apk out/aligned.apk
           rm out/aligned.apk
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.release_tag != '' }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: out/StreamForge-android.apk
       - uses: actions/upload-artifact@v4
         with:
