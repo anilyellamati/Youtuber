@@ -1,6 +1,10 @@
 mod ffmpeg;
 mod files;
 mod media;
+#[cfg(feature = "youtube")]
+mod youtube;
+#[cfg(not(feature = "youtube"))]
+#[path = "youtube_stub.rs"]
 mod youtube;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "StreamForge Lite",
+  "mainBinaryName": "StreamForgeLite",
+  "version": "1.0.0",
+  "identifier": "com.streamforge.lite",
+  "build": {
+    "beforeDevCommand": "npm run dev:lite",
+    "beforeBuildCommand": "npm run build:lite",
+    "frontendDist": "../dist-lite"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "StreamForge Lite",
+        "width": 1000,
+        "height": 660,
+        "minWidth": 760,
+        "minHeight": 520,
+        "center": true,
+        "backgroundThrottling": "disabled",
+        "url": "lite.html"
+      }
+    ]
+  },
+  "bundle": {
+    "shortDescription": "Lightweight screen + camera recorder with filters",
+    "longDescription": "StreamForge Lite records your screen or a window together with your camera, microphone and computer sound, with live video filters. Tiny, no extras."
+  }
+}

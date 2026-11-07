@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "icons": "node scripts/make-icons.mjs && tauri icon assets/icon-1024.png",
-    "fetch-ffmpeg": "node scripts/fetch-ffmpeg.mjs"
+    "fetch-ffmpeg": "node scripts/fetch-ffmpeg.mjs",
+    "dev:lite": "vite -c vite.lite.config.ts",
+    "build:lite": "tsc --noEmit && vite build -c vite.lite.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

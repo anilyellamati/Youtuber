@@ -3600,7 +3600,6 @@ version = "1.0.2"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
- "futures-util",
  "rand 0.8.8",
  "reqwest 0.12.28",
  "serde",
@@ -3613,7 +3612,6 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-screenrec",
  "tokio",
- "tokio-util",
  "url",
 ]
 

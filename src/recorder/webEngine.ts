@@ -76,6 +76,8 @@ export class Compositor {
   level = 0;
   layout: CameraLayout;
   placeholder = true; // draw a stand-in game frame when no screen is shared (native engine preview)
+  /** CSS filter applied to the screen/gameplay area (Lite "video filter"). */
+  screenFilter = "none";
   /** Periodic snapshot of the selected display (native engine preview). */
   screenStill: (HTMLImageElement & { videoWidth?: number; videoHeight?: number }) | null = null;
 
@@ -133,12 +135,12 @@ export class Compositor {
   }
 
   /** Must be called from a click (browser requirement). */
-  async pickScreen(): Promise<boolean> {
+  async pickScreen(withAudio = true): Promise<boolean> {
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: { ideal: this.opts.fps, max: 60 }, width: { ideal: 3840 }, height: { ideal: 2160 } },
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } as MediaTrackConstraints,
+      audio: withAudio ? ({ echoCancellation: false, noiseSuppression: false, autoGainControl: false } as MediaTrackConstraints) : false,
       // Chromium hints: include game audio, prefer whole screen, keep app out of the capture.
-      ...({ systemAudio: "include", selfBrowserSurface: "exclude", surfaceSwitching: "include", monitorTypeSurfaces: "include" } as object),
+      ...({ systemAudio: withAudio ? "include" : "exclude", selfBrowserSurface: "exclude", surfaceSwitching: "include", monitorTypeSurfaces: "include" } as object),
     } as DisplayMediaStreamOptions);
     this.screenStream?.getTracks().forEach((t) => t.stop());
     this.screenStream = stream;
@@ -155,6 +157,12 @@ export class Compositor {
   get hasScreen() {
     return !!this.screenStream;
   }
+  stopScreen() {
+    this.screenStream?.getTracks().forEach((t) => t.stop());
+    this.screenStream = null;
+    this.screenVideo = null;
+  }
+
   get hasCamera() {
     return !!this.camStream;
   }
@@ -185,6 +193,7 @@ export class Compositor {
     ctx.fillStyle = "#07060b";
     ctx.fillRect(0, 0, W, H);
     if (rects.screen) {
+      ctx.filter = this.screenFilter;
       if (this.screenVideo && this.screenVideo.readyState >= 2) {
         drawScreen(ctx, this.screenVideo, rects.screen, rects.screenCover);
       } else if (this.screenStill && this.placeholder) {
@@ -192,6 +201,7 @@ export class Compositor {
       } else if (this.placeholder) {
         drawPlaceholder(ctx, rects.screen);
       }
+      ctx.filter = "none";
     }
     const level = this.sampleLevel();
     if (rects.camera) {

@@ -8,3 +8,4 @@ src-tauri/bin/
 .claude/
 plugins/**/target
 **/.tauri
+dist-lite
