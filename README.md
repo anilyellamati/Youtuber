@@ -13,7 +13,7 @@ Record your gameplay with a facecam, edit it, and publish it to YouTube with SEO
 | **Linux** | [.deb](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.2/StreamForge_1.0.2_amd64.deb) · [.AppImage](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.2/StreamForge_1.0.2_amd64.AppImage) |
 | **Android 7+** | [StreamForge_1.0.2_android.apk](https://github.com/anilyellamati/Youtuber/releases/download/v1.0.2/StreamForge_1.0.2_android.apk) (25 MB) — allow "Install unknown apps" when asked |
 
-All files: [Releases → v1.0.2](https://github.com/anilyellamati/Youtuber/releases/tag/v1.0.2). The repository is private, so the links only work while you're signed in to GitHub with access.
+All files: [Releases → v1.0.2](https://github.com/anilyellamati/Youtuber/releases/tag/v1.0.2).
 
 **First launch on Mac:** the app isn't notarized yet, so right-click StreamForge → **Open** → **Open**. If macOS says the app is "damaged", run `xattr -cr /Applications/StreamForge.app` in Terminal.
 
