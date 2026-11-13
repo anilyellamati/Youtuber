@@ -78,7 +78,7 @@ fn open(device: cpal::Device, config: cpal::SupportedStreamConfig, queue: Queue)
     Some(stream)
 }
 
-pub fn spawn_mixer(listener: TcpListener, stop: Arc<AtomicBool>, system_sound: bool, mic: bool) -> std::thread::JoinHandle<()> {
+pub fn spawn_mixer(listener: TcpListener, stop: Arc<AtomicBool>, system_sound: bool, mic: Option<String>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let host = cpal::default_host();
         let mut sources: Vec<(Queue, cpal::Stream)> = Vec::new();
@@ -93,8 +93,13 @@ pub fn spawn_mixer(listener: TcpListener, stop: Arc<AtomicBool>, system_sound: b
                 }
             }
         }
-        if mic {
-            if let Some(dev) = host.default_input_device() {
+        if let Some(name) = mic {
+            let chosen = if name.is_empty() {
+                None
+            } else {
+                host.input_devices().ok().and_then(|mut d| d.find(|x| x.name().map(|n| n == name).unwrap_or(false)))
+            };
+            if let Some(dev) = chosen.or_else(|| host.default_input_device()) {
                 if let Ok(cfg) = dev.default_input_config() {
                     let q: Queue = Default::default();
                     if let Some(s) = open(dev, cfg, q.clone()) {
@@ -148,4 +153,12 @@ pub fn spawn_mixer(listener: TcpListener, stop: Arc<AtomicBool>, system_sound: b
         }
         drop(pipe); // EOF on audio: ffmpeg finishes the file
     })
+}
+
+/// Names of the connected microphones / audio inputs.
+pub fn list_mics() -> Vec<String> {
+    cpal::default_host()
+        .input_devices()
+        .map(|d| d.filter_map(|x| x.name().ok()).collect())
+        .unwrap_or_default()
 }

@@ -5,6 +5,8 @@ mod audio;
 mod core;
 #[cfg(windows)]
 mod gui;
+#[cfg(windows)]
+mod win;
 
 use std::io::Write;
 use std::time::Duration;
@@ -25,12 +27,16 @@ fn selftest(secs: u64) -> i32 {
         return 1;
     };
     say(format!("strategy: {kind} ({})", core::label(kind)));
+    say(format!("microphones: {:?}", audio::list_mics()));
+    say(format!("cameras: {:?}", core::list_cameras()));
+    #[cfg(windows)]
+    say(format!("displays: {:?}  windows: {}", win::monitors(), win::windows().len()));
     let dir = std::env::temp_dir().join("sfrec-selftest");
     let _ = std::fs::create_dir_all(&dir);
     if let Some(d) = core::disk(&dir) {
         say(format!("disk: {:.1}% used, {} free", d.used * 100.0, core::fmt_gb(d.free_bytes)));
     }
-    let mut rec = match core::Recording::start(&dir, kind, true, true) {
+    let mut rec = match core::Recording::start(&dir, kind, &core::Source::default(), true, Some(String::new()), None) {
         Ok(r) => r,
         Err(e) => {
             say(format!("FAIL: {e}"));

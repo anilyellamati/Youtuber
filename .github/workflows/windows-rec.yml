@@ -34,6 +34,8 @@ jobs:
           New-Item -ItemType Directory -Force out/StreamForgeRec | Out-Null
           Copy-Item rec/target/release/StreamForgeRec.exe out/StreamForgeRec/
           Copy-Item src-tauri/bin/ffmpeg-x86_64-pc-windows-msvc.exe out/StreamForgeRec/ffmpeg.exe
+          # must not need the Visual C++ runtime to be installed
+          if (Select-String -Path out/StreamForgeRec/StreamForgeRec.exe -Pattern "VCRUNTIME140" -SimpleMatch -Quiet) { throw "exe still depends on VCRUNTIME140.dll" }
           "App exe: {0:N2} MB" -f ((Get-Item out/StreamForgeRec/StreamForgeRec.exe).Length / 1MB)
           "ffmpeg:  {0:N0} MB" -f ((Get-Item out/StreamForgeRec/ffmpeg.exe).Length / 1MB)
 

@@ -72,27 +72,100 @@ pub fn label(kind: &str) -> &'static str {
     }
 }
 
-/// (video input args, video encoder args) for live capture.
-fn capture_args(kind: &str) -> (Vec<String>, Vec<String>) {
-    let dd = |tail: &str| s(&["-f", "lavfi", "-i", &format!("ddagrab=framerate={FPS}:draw_mouse=1{tail}")]);
-    let even = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
-    let gop = (FPS * 2).to_string();
-    match kind {
-        // GPU frames go straight from desktop duplication into the GPU encoder.
-        "nvenc" => (dd(""), s(&["-c:v", "h264_nvenc", "-preset", "p3", "-rc", "vbr", "-cq", "24", "-b:v", "10M", "-maxrate", "16M", "-g", &gop])),
-        "amf" => (dd(""), s(&["-c:v", "h264_amf", "-usage", "transcoding", "-quality", "speed", "-rc", "vbr_peak", "-b:v", "10M", "-maxrate", "16M", "-g", &gop])),
-        "qsv" => (dd(",hwmap=derive_device=qsv,format=qsv"), s(&["-c:v", "h264_qsv", "-preset", "veryfast", "-b:v", "10M", "-maxrate", "16M", "-g", &gop])),
-        "mf" => (dd(&format!(",hwdownload,format=bgra,{even},format=nv12")), s(&["-c:v", "h264_mf", "-hw_encoding", "1", "-b:v", "10M", "-g", &gop])),
-        "x264-dd" => (dd(&format!(",hwdownload,format=bgra,{even},format=yuv420p")), s(&["-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-threads", "2", "-g", &gop])),
-        "x264-gdi" => (
-            s(&["-f", "gdigrab", "-framerate", "24", "-draw_mouse", "1", "-i", "desktop"]),
-            s(&["-vf", &format!("{even},format=yuv420p"), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-threads", "2", "-g", "48"]),
-        ),
-        _ => (
-            s(&["-re", "-f", "lavfi", "-i", &format!("testsrc2=s=1280x720:r={FPS}")]),
-            s(&["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-g", &gop]),
-        ),
+/// What to capture. Coordinates are real pixels.
+#[derive(Clone, Debug, Default)]
+pub struct Source {
+    /// Display number (0 = primary) for GPU desktop duplication.
+    pub output: u32,
+    /// Area inside that display: (x, y, w, h). None = the whole display.
+    pub region: Option<(i32, i32, i32, i32)>,
+    /// The same area in virtual-desktop coordinates (compatibility capture).
+    pub virt: Option<(i32, i32, i32, i32)>,
+}
+
+const EVEN: &str = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+
+fn is_dd(kind: &str) -> bool {
+    matches!(kind, "nvenc" | "amf" | "qsv" | "mf" | "x264-dd")
+}
+
+/// Video input args. `software` = frames must come back to system memory (needed
+/// when the camera is overlaid); otherwise GPU kinds stay on the GPU end to end.
+fn video_input(kind: &str, src: &Source, software: bool) -> Vec<String> {
+    if is_dd(kind) {
+        let area = match src.region {
+            Some((x, y, w, h)) => format!(":video_size={w}x{h}:offset_x={x}:offset_y={y}"),
+            None => String::new(),
+        };
+        let tail = if software {
+            ",hwdownload,format=bgra".to_string()
+        } else {
+            match kind {
+                "qsv" => ",hwmap=derive_device=qsv,format=qsv".to_string(),
+                "mf" => format!(",hwdownload,format=bgra,{EVEN},format=nv12"),
+                "x264-dd" => format!(",hwdownload,format=bgra,{EVEN},format=yuv420p"),
+                _ => String::new(),
+            }
+        };
+        return s(&["-f", "lavfi", "-i", &format!("ddagrab=output_idx={}:framerate={FPS}:draw_mouse=1{area}{tail}", src.output)]);
     }
+    if kind == "x264-gdi" {
+        let mut v = s(&["-f", "gdigrab", "-framerate", "24", "-draw_mouse", "1"]);
+        if let Some((x, y, w, h)) = src.virt {
+            v.extend(s(&["-offset_x", &x.to_string(), "-offset_y", &y.to_string(), "-video_size", &format!("{w}x{h}")]));
+        }
+        v.extend(s(&["-i", "desktop"]));
+        return v;
+    }
+    s(&["-re", "-f", "lavfi", "-i", &format!("testsrc2=s=1280x720:r={FPS}")])
+}
+
+/// Encoder args for live capture. `software` = input frames are in system memory.
+fn video_codec(kind: &str, software: bool) -> Vec<String> {
+    let gop = (FPS * 2).to_string();
+    let mut v = match kind {
+        "nvenc" => s(&["-c:v", "h264_nvenc", "-preset", "p3", "-rc", "vbr", "-cq", "24", "-b:v", "10M", "-maxrate", "16M", "-g", &gop]),
+        "amf" => s(&["-c:v", "h264_amf", "-usage", "transcoding", "-quality", "speed", "-rc", "vbr_peak", "-b:v", "10M", "-maxrate", "16M", "-g", &gop]),
+        "qsv" => s(&["-c:v", "h264_qsv", "-preset", "veryfast", "-b:v", "10M", "-maxrate", "16M", "-g", &gop]),
+        "mf" => s(&["-c:v", "h264_mf", "-hw_encoding", "1", "-b:v", "10M", "-g", &gop]),
+        "x264-dd" => s(&["-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-threads", "2", "-g", &gop]),
+        "x264-gdi" => s(&["-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-threads", "2", "-g", "48"]),
+        _ => s(&["-c:v", "libx264", "-preset", "ultrafast", "-g", &gop]),
+    };
+    if software || kind == "x264-gdi" || kind == "test" {
+        v.extend(s(&["-pix_fmt", if matches!(kind, "qsv" | "mf") { "nv12" } else { "yuv420p" }]));
+    }
+    v
+}
+
+/// (video input args, video encoder args) for plain screen capture.
+fn capture_args(kind: &str) -> (Vec<String>, Vec<String>) {
+    let mut codec = Vec::new();
+    if kind == "x264-gdi" {
+        codec.extend(s(&["-vf", EVEN]));
+    }
+    codec.extend(video_codec(kind, false));
+    (video_input(kind, &Source::default(), false), codec)
+}
+
+/// Cameras known to DirectShow (Windows).
+pub fn list_cameras() -> Vec<String> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    let Ok(out) = ffmpeg().args(["-loglevel", "info", "-list_devices", "true", "-f", "dshow", "-i", "dummy"]).output() else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    let mut cams = Vec::new();
+    for line in text.lines().filter(|l| l.contains("(video)")) {
+        if let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) {
+            if b > a + 1 && !cams.iter().any(|c| c == &line[a + 1..b]) {
+                cams.push(line[a + 1..b].to_string());
+            }
+        }
+    }
+    cams
 }
 
 fn wait_timeout(child: &mut Child, limit: Duration) -> Option<bool> {
@@ -161,20 +234,36 @@ pub struct Recording {
 }
 
 impl Recording {
-    pub fn start(dir: &Path, kind: &str, system_sound: bool, mic: bool) -> Result<Recording, String> {
+    /// `mic`: None = off, Some("") = default device, Some(name) = that device.
+    /// `camera`: a DirectShow camera shown as a small picture in the bottom-right corner.
+    pub fn start(dir: &Path, kind: &str, src: &Source, system_sound: bool, mic: Option<String>, camera: Option<String>) -> Result<Recording, String> {
         let name = chrono::Local::now().format("Rec_%Y-%m-%d_%H-%M-%S.mkv").to_string();
         let path = dir.join(name);
-        let (input, codec) = capture_args(kind);
+        let cam = camera.filter(|c| !c.is_empty());
+        let software = cam.is_some();
         // Audio reaches ffmpeg over a loopback socket as raw PCM mixed by this process;
         // stdin stays free for the "q" (finish file) command. `-shortest` is avoided:
         // with a live audio input it stalls the video stream in FFmpeg 8.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let mut cmd = ffmpeg_raw();
-        cmd.args(&input)
-            .args(["-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &format!("tcp://127.0.0.1:{port}")])
-            .args(["-map", "0:v", "-map", "1:a"])
-            .args(&codec)
+        cmd.args(video_input(kind, src, software));
+        if let Some(cam) = &cam {
+            cmd.args(["-f", "dshow", "-rtbufsize", "64M", "-i", &format!("video={cam}")]);
+        }
+        let audio_idx = if cam.is_some() { 2 } else { 1 };
+        cmd.args(["-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &format!("tcp://127.0.0.1:{port}")]);
+        if cam.is_some() {
+            // camera: about a quarter of the frame height, bottom-right corner
+            cmd.args(["-filter_complex", &format!("[0:v]split[scr][ref];[1:v][ref]scale=-2:rh/4[cam];[scr][cam]overlay=W-w-24:H-h-24,{EVEN}[v]"), "-map", "[v]"]);
+        } else {
+            if kind == "x264-gdi" {
+                cmd.args(["-vf", EVEN]);
+            }
+            cmd.args(["-map", "0:v"]);
+        }
+        cmd.args(["-map", &format!("{audio_idx}:a")])
+            .args(video_codec(kind, software))
             .args(["-c:a", "aac", "-b:a", "160k"])
             .arg(&path)
             .stdin(Stdio::piped())

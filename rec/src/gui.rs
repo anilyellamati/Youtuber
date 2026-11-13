@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use native_windows_gui as nwg;
 
-use crate::core::{self, ExportState, Recording, PRESETS};
+use crate::core::{self, ExportState, Recording, Source, PRESETS};
+use crate::{audio, win};
 
 #[derive(Default)]
 struct Ui {
@@ -17,8 +18,14 @@ struct Ui {
     big: nwg::Font,
     status: nwg::Label,
     disk: nwg::Label,
+    l_src: nwg::Label,
+    src: nwg::ComboBox<String>,
+    refresh: nwg::Button,
+    l_mic: nwg::Label,
+    mic: nwg::ComboBox<String>,
+    l_cam: nwg::Label,
+    cam: nwg::ComboBox<String>,
     sys: nwg::CheckBox,
-    mic: nwg::CheckBox,
     rec: nwg::Button,
     last: nwg::Label,
     exports: [nwg::Button; 4],
@@ -32,10 +39,15 @@ struct State {
     dir: PathBuf,
     strategy: Option<&'static str>,
     detecting: bool,
+    sources: Vec<Source>,
+    mics: Vec<String>,
+    cams: Vec<String>,
     rec: Option<Recording>,
     last: Option<PathBuf>,
     export: Option<(Arc<Mutex<ExportState>>, &'static str)>,
 }
+
+type Detected = Arc<Mutex<Option<(Option<&'static str>, Vec<String>)>>>;
 
 enum Msg {
     Info(String),
@@ -45,7 +57,7 @@ enum Msg {
 fn build(ui: &mut Ui) -> Result<(), nwg::NwgError> {
     nwg::Font::builder().family("Segoe UI").size(26).weight(700).build(&mut ui.big)?;
     nwg::Window::builder()
-        .size((460, 372))
+        .size((460, 462))
         .position((320, 220))
         .title("StreamForge Rec")
         .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE | nwg::WindowFlags::MINIMIZE_BOX)
@@ -53,17 +65,23 @@ fn build(ui: &mut Ui) -> Result<(), nwg::NwgError> {
     let w = &ui.window;
     nwg::Label::builder().text("Starting…").position((20, 12)).size((420, 34)).font(Some(&ui.big)).parent(w).build(&mut ui.status)?;
     nwg::Label::builder().text("").position((20, 50)).size((420, 20)).parent(w).build(&mut ui.disk)?;
-    nwg::CheckBox::builder().text("Record computer sound").position((20, 78)).size((200, 22)).check_state(nwg::CheckBoxState::Checked).parent(w).build(&mut ui.sys)?;
-    nwg::CheckBox::builder().text("Record microphone").position((240, 78)).size((200, 22)).check_state(nwg::CheckBoxState::Checked).parent(w).build(&mut ui.mic)?;
-    nwg::Button::builder().text("Start recording  (F9)").position((20, 108)).size((420, 48)).enabled(false).parent(w).build(&mut ui.rec)?;
-    nwg::Label::builder().text("Export for YouTube: record something first.").position((20, 172)).size((420, 20)).parent(w).build(&mut ui.last)?;
-    let spots = [(20, 198), (235, 198), (20, 238), (235, 238)];
+    nwg::Label::builder().text("Screen / window:").position((20, 82)).size((108, 20)).parent(w).build(&mut ui.l_src)?;
+    nwg::ComboBox::builder().position((130, 78)).size((240, 24)).parent(w).build(&mut ui.src)?;
+    nwg::Button::builder().text("Refresh").position((376, 77)).size((64, 26)).parent(w).build(&mut ui.refresh)?;
+    nwg::Label::builder().text("Microphone:").position((20, 114)).size((108, 20)).parent(w).build(&mut ui.l_mic)?;
+    nwg::ComboBox::builder().position((130, 110)).size((310, 24)).parent(w).build(&mut ui.mic)?;
+    nwg::Label::builder().text("Camera:").position((20, 146)).size((108, 20)).parent(w).build(&mut ui.l_cam)?;
+    nwg::ComboBox::builder().position((130, 142)).size((310, 24)).parent(w).build(&mut ui.cam)?;
+    nwg::CheckBox::builder().text("Record computer sound").position((20, 174)).size((300, 22)).check_state(nwg::CheckBoxState::Checked).parent(w).build(&mut ui.sys)?;
+    nwg::Button::builder().text("Start recording  (F9)").position((20, 202)).size((420, 48)).enabled(false).parent(w).build(&mut ui.rec)?;
+    nwg::Label::builder().text("Export for YouTube: record something first.").position((20, 264)).size((420, 20)).parent(w).build(&mut ui.last)?;
+    let spots = [(20, 290), (235, 290), (20, 330), (235, 330)];
     for (i, b) in ui.exports.iter_mut().enumerate() {
         nwg::Button::builder().text(PRESETS[i].label).position(spots[i]).size((205, 34)).enabled(false).parent(w).build(b)?;
     }
-    nwg::ProgressBar::builder().range(0..100).pos(0).position((20, 284)).size((420, 14)).parent(w).build(&mut ui.bar)?;
-    nwg::Button::builder().text("Open recordings folder").position((20, 310)).size((170, 28)).parent(w).build(&mut ui.folder)?;
-    nwg::Label::builder().text("").position((200, 315)).size((240, 20)).parent(w).build(&mut ui.engine)?;
+    nwg::ProgressBar::builder().range(0..100).pos(0).position((20, 376)).size((420, 14)).parent(w).build(&mut ui.bar)?;
+    nwg::Button::builder().text("Open recordings folder").position((20, 402)).size((170, 28)).parent(w).build(&mut ui.folder)?;
+    nwg::Label::builder().text("").position((200, 407)).size((240, 20)).parent(w).build(&mut ui.engine)?;
     nwg::AnimationTimer::builder().parent(w).interval(Duration::from_millis(500)).active(true).build(&mut ui.timer)?;
     Ok(())
 }
@@ -78,6 +96,55 @@ fn show(ui: &Ui, msg: Option<Msg>) {
         }
         None => {}
     }
+}
+
+/// Fills the screen/window dropdown with every display, then every open window.
+fn load_sources(ui: &Ui, st: &mut State) {
+    let mons = win::monitors();
+    let mut names = Vec::new();
+    st.sources.clear();
+    for (i, m) in mons.iter().enumerate() {
+        names.push(format!("Display {} ({}x{}){}", i + 1, m.w, m.h, if i == 0 { " - main" } else { "" }));
+        st.sources.push(win::display_source(i, m));
+    }
+    for (title, rect) in win::windows() {
+        if let Some(src) = win::window_source(&rect, &mons) {
+            let short: String = title.chars().take(60).collect();
+            names.push(format!("Window: {short}"));
+            st.sources.push(src);
+        }
+    }
+    if st.sources.is_empty() {
+        names.push("Main display".into());
+        st.sources.push(Source::default());
+    }
+    ui.src.set_collection(names);
+    ui.src.set_selection(Some(0));
+}
+
+fn load_mics(ui: &Ui, st: &mut State) {
+    st.mics = audio::list_mics();
+    let mut names = vec!["Default microphone".to_string()];
+    names.extend(st.mics.iter().cloned());
+    names.push("No microphone".into());
+    ui.mic.set_collection(names);
+    ui.mic.set_selection(Some(0));
+}
+
+fn load_cams(ui: &Ui, st: &mut State, cams: Vec<String>) {
+    st.cams = cams;
+    let mut names = vec!["No camera".to_string()];
+    names.extend(st.cams.iter().cloned());
+    ui.cam.set_collection(names);
+    ui.cam.set_selection(Some(0));
+}
+
+fn set_inputs(ui: &Ui, on: bool) {
+    ui.src.set_enabled(on);
+    ui.refresh.set_enabled(on);
+    ui.mic.set_enabled(on);
+    ui.cam.set_enabled(on);
+    ui.sys.set_enabled(on);
 }
 
 fn set_exports(ui: &Ui, on: bool) {
@@ -102,8 +169,7 @@ fn finish_recording(ui: &Ui, st: &mut State) {
         st.last = Some(path);
         ui.rec.set_text("Start recording  (F9)");
         ui.status.set_text("Ready");
-        ui.sys.set_enabled(true);
-        ui.mic.set_enabled(true);
+        set_inputs(ui, true);
         set_exports(ui, true);
     }
 }
@@ -124,13 +190,22 @@ fn toggle(ui: &Ui, state: &RefCell<State>) -> Option<Msg> {
         }
     }
     let sys = ui.sys.check_state() == nwg::CheckBoxState::Checked;
-    let mic = ui.mic.check_state() == nwg::CheckBoxState::Checked;
-    match Recording::start(&st.dir, kind, sys, mic) {
+    // dropdown rows: 0 = default, 1..=n = a device, last = none
+    let mic = match ui.mic.selection().unwrap_or(0) {
+        0 => Some(String::new()),
+        i if i <= st.mics.len() => Some(st.mics[i - 1].clone()),
+        _ => None,
+    };
+    let cam = match ui.cam.selection().unwrap_or(0) {
+        0 => None,
+        i => st.cams.get(i - 1).cloned(),
+    };
+    let src = st.sources.get(ui.src.selection().unwrap_or(0)).cloned().unwrap_or_default();
+    match Recording::start(&st.dir, kind, &src, sys, mic, cam) {
         Ok(rec) => {
             st.rec = Some(rec);
             ui.rec.set_text("Stop recording  (F9)");
-            ui.sys.set_enabled(false);
-            ui.mic.set_enabled(false);
+            set_inputs(ui, false);
             set_exports(ui, false);
             None
         }
@@ -138,13 +213,14 @@ fn toggle(ui: &Ui, state: &RefCell<State>) -> Option<Msg> {
     }
 }
 
-fn tick(ui: &Ui, state: &RefCell<State>, detected: &Arc<Mutex<Option<Option<&'static str>>>>) -> Option<Msg> {
+fn tick(ui: &Ui, state: &RefCell<State>, detected: &Detected) -> Option<Msg> {
     let mut st = state.try_borrow_mut().ok()?;
     let mut msg = None;
 
     if st.detecting {
-        if let Some(found) = detected.lock().unwrap().take() {
+        if let Some((found, cams)) = detected.lock().unwrap().take() {
             st.detecting = false;
+            load_cams(ui, &mut st, cams);
             st.strategy = found;
             match found {
                 Some(kind) => {
@@ -227,15 +303,22 @@ pub fn run() {
     build(&mut ui).expect("window");
     let ui = Rc::new(ui);
 
-    let state = Rc::new(RefCell::new(State { dir: core::output_dir(), strategy: None, detecting: true, rec: None, last: None, export: None }));
+    let state = Rc::new(RefCell::new(State { dir: core::output_dir(), strategy: None, detecting: true, sources: Vec::new(), mics: Vec::new(), cams: Vec::new(), rec: None, last: None, export: None }));
 
-    // Trial-run the capture strategies off the UI thread (a few seconds on first start).
-    let detected: Arc<Mutex<Option<Option<&'static str>>>> = Arc::new(Mutex::new(None));
+    {
+        let mut st = state.borrow_mut();
+        load_sources(&ui, &mut st);
+        load_mics(&ui, &mut st);
+        load_cams(&ui, &mut st, Vec::new());
+    }
+
+    // Trial-run the capture strategies and list cameras off the UI thread.
+    let detected: Detected = Arc::new(Mutex::new(None));
     {
         let d = detected.clone();
         std::thread::spawn(move || {
             let found = core::detect_strategy();
-            *d.lock().unwrap() = Some(found);
+            *d.lock().unwrap() = Some((found, core::list_cameras()));
         });
     }
 
@@ -261,6 +344,15 @@ pub fn run() {
         let msg = match evt {
             E::OnTimerTick if handle == ui_e.timer.handle => tick(&ui_e, &st_e, &detected),
             E::OnButtonClick if handle == ui_e.rec.handle => toggle(&ui_e, &st_e),
+            E::OnButtonClick if handle == ui_e.refresh.handle => {
+                if let Ok(mut st) = st_e.try_borrow_mut() {
+                    load_sources(&ui_e, &mut st);
+                    load_mics(&ui_e, &mut st);
+                    let cams = core::list_cameras();
+                    load_cams(&ui_e, &mut st, cams);
+                }
+                None
+            }
             E::OnButtonClick if handle == ui_e.folder.handle => {
                 let dir = st_e.borrow().dir.clone();
                 let _ = std::process::Command::new("explorer").arg(dir).spawn();
