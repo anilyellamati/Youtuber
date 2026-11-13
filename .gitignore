@@ -9,3 +9,4 @@ src-tauri/bin/
 plugins/**/target
 **/.tauri
 dist-lite
+rec/target

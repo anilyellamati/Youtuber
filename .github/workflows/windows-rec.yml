@@ -1,0 +1,87 @@
+name: StreamForge Rec (Windows)
+
+# Strict, lightweight native screen recorder. Builds the exe, runs its built-in
+# self-test (record -> stop -> 4 exports), launches the window and screenshots it.
+on:
+  push:
+    tags: ["rec-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: rec -> target
+
+      - name: Build
+        working-directory: rec
+        run: cargo build --release
+
+      - name: Assemble folder (exe + ffmpeg)
+        shell: pwsh
+        run: |
+          node scripts/fetch-ffmpeg.mjs x86_64-pc-windows-msvc
+          New-Item -ItemType Directory -Force out/StreamForgeRec | Out-Null
+          Copy-Item rec/target/release/StreamForgeRec.exe out/StreamForgeRec/
+          Copy-Item src-tauri/bin/ffmpeg-x86_64-pc-windows-msvc.exe out/StreamForgeRec/ffmpeg.exe
+          "App exe: {0:N2} MB" -f ((Get-Item out/StreamForgeRec/StreamForgeRec.exe).Length / 1MB)
+          "ffmpeg:  {0:N0} MB" -f ((Get-Item out/StreamForgeRec/ffmpeg.exe).Length / 1MB)
+
+      - name: Self-test (record 6 s, export 4 presets)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path out/StreamForgeRec/StreamForgeRec.exe) -ArgumentList "--selftest","6" -WorkingDirectory out -Wait -PassThru
+          Get-Content out/selftest.log
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Launch window and take screenshot
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path out/StreamForgeRec/StreamForgeRec.exe) -PassThru
+          Start-Sleep -Seconds 25
+          $p.Refresh()
+          "Window running: $(-not $p.HasExited)"
+          "App memory (working set): {0:N1} MB" -f ($p.WorkingSet64 / 1MB)
+          "App memory (private):     {0:N1} MB" -f ($p.PrivateMemorySize64 / 1MB)
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("out/StreamForgeRec-screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          Stop-Process -Id $p.Id -Force
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          Remove-Item out/selftest.log -ErrorAction SilentlyContinue
+          Compress-Archive -Path out/StreamForgeRec -DestinationPath out/StreamForgeRec-windows-x64.zip
+          "Zip: {0:N0} MB" -f ((Get-Item out/StreamForgeRec-windows-x64.zip).Length / 1MB)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StreamForgeRec
+          path: |
+            out/StreamForgeRec-windows-x64.zip
+            out/StreamForgeRec-screenshot.png
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --title "StreamForge Rec ${TAG#rec-v}" \
+            --notes "Strict, lightweight Windows screen recorder: native window, GPU capture and encoding, disk guard at 97%, four YouTube export presets. Unzip and run StreamForgeRec.exe."
+          gh release upload "$TAG" out/StreamForgeRec-windows-x64.zip out/StreamForgeRec-screenshot.png --clobber
