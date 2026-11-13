@@ -353,13 +353,13 @@ fn export_filter(p: &Preset) -> String {
     if h > w {
         // Mobile 9:16: the whole screen stays visible, over a blurred copy of itself.
         format!(
-            "[0:v]fps={FPS},split[a][b];[a]scale={sw}:{sh}:force_original_aspect_ratio=increase,crop={sw}:{sh},boxblur=6,scale={w}:{h}[bg];\
-             [b]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]",
-            sw = w / 4,
-            sh = h / 4
+            "[0:v]fps={FPS},split[a][b];[a]scale={sw}:{sh}:force_original_aspect_ratio=increase:flags=fast_bilinear,crop={sw}:{sh},boxblur=3,scale={w}:{h}:flags=fast_bilinear[bg];\
+             [b]scale={w}:{h}:force_original_aspect_ratio=decrease:flags=bilinear[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]",
+            sw = w / 8,
+            sh = h / 8
         )
     } else {
-        format!("[0:v]fps={FPS},scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1[v]")
+        format!("[0:v]fps={FPS},scale={w}:{h}:force_original_aspect_ratio=decrease:flags=bilinear,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1[v]")
     }
 }
 
@@ -373,6 +373,32 @@ pub fn duration(path: &Path) -> Option<f64> {
     (parts.len() == 3).then(|| parts[0] * 3600.0 + parts[1] * 60.0 + parts[2])
 }
 
+/// Video frame size, read from ffmpeg's probe output.
+pub fn video_size(path: &Path) -> Option<(u32, u32)> {
+    let out = ffmpeg().args(["-loglevel", "info", "-i"]).arg(path).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    let line = text.lines().find(|l| l.contains("Video:"))?;
+    line.split([' ', ',']).find_map(|tok| {
+        let (w, h) = tok.split_once('x')?;
+        let (w, h) = (w.parse::<u32>().ok()?, h.parse::<u32>().ok()?);
+        (w >= 16 && h >= 16).then_some((w, h))
+    })
+}
+
+/// "YouTube High" for a recording that is already 1080p or smaller: repackage as
+/// MP4 without re-encoding. Takes seconds and keeps the original quality.
+fn run_copy(master: &Path, p: &Preset, state: &Arc<Mutex<ExportState>>) -> Result<PathBuf, String> {
+    let out = export_path(master, p);
+    let res = ffmpeg().arg("-i").arg(master).args(["-map", "0:v", "-map", "0:a?", "-c", "copy", "-movflags", "+faststart"]).arg(&out).output().map_err(|e| e.to_string())?;
+    if res.status.success() && out.metadata().map(|m| m.len() > 1000).unwrap_or(false) {
+        state.lock().unwrap().progress = 1.0;
+        Ok(out)
+    } else {
+        let _ = std::fs::remove_file(&out);
+        Err(String::from_utf8_lossy(&res.stderr).lines().rev().take(2).collect::<Vec<_>>().join(" "))
+    }
+}
+
 pub fn export_path(master: &Path, p: &Preset) -> PathBuf {
     let stem = master.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Rec".into());
     master.with_file_name(format!("{stem}_{}.mp4", p.id))
@@ -381,7 +407,8 @@ pub fn export_path(master: &Path, p: &Preset) -> PathBuf {
 fn run_export(master: &Path, p: &Preset, kind: &str, total: Option<f64>, state: &Arc<Mutex<ExportState>>) -> Result<PathBuf, String> {
     let out = export_path(master, p);
     let mut child = ffmpeg()
-        .args(["-progress", "pipe:1", "-nostats", "-i"])
+        // decode on the graphics card when possible (falls back to CPU by itself)
+        .args(["-progress", "pipe:1", "-nostats", "-hwaccel", "auto", "-i"])
         .arg(master)
         .args(["-filter_complex", &export_filter(p), "-map", "[v]", "-map", "0:a?"])
         .args(export_codec(kind, p.kbps))
@@ -418,6 +445,14 @@ pub fn start_export(master: PathBuf, p: Preset, kind: String) -> Arc<Mutex<Expor
     let st = state.clone();
     std::thread::spawn(move || {
         let total = duration(&master);
+        if p.id == "YouTube-High" && video_size(&master).map(|(w, h)| w <= 1920 && h <= 1080).unwrap_or(false) {
+            if let Ok(out) = run_copy(&master, &p, &st) {
+                let mut s = st.lock().unwrap();
+                s.progress = 1.0;
+                s.done = Some(Ok(out));
+                return;
+            }
+        }
         let mut res = run_export(&master, &p, &kind, total, &st);
         if res.is_err() && !kind.starts_with("x264") && kind != "test" {
             res = run_export(&master, &p, "x264", total, &st);

@@ -1,6 +1,6 @@
 [package]
 name = "streamforge-rec"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2021"
 description = "StreamForge Rec - strict, lightweight screen recorder"
 

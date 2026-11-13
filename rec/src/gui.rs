@@ -300,7 +300,12 @@ fn export(ui: &Ui, state: &RefCell<State>, i: usize) -> Option<Msg> {
 
 pub fn run() {
     nwg::init().expect("init");
-    let _ = nwg::Font::set_global_family("Segoe UI");
+    // A fixed font size: Windows' "make text bigger" setting enlarges the system font
+    // without scaling controls, which clipped the text.
+    let mut base = nwg::Font::default();
+    if nwg::Font::builder().family("Segoe UI").size(17).build(&mut base).is_ok() {
+        nwg::Font::set_global_default(Some(base));
+    }
     let mut ui = Ui::default();
     build(&mut ui).expect("window");
     let ui = Rc::new(ui);
