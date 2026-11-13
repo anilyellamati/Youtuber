@@ -65,7 +65,7 @@ fn build(ui: &mut Ui) -> Result<(), nwg::NwgError> {
     let w = &ui.window;
     nwg::Label::builder().text("Starting…").position((20, 12)).size((420, 34)).font(Some(&ui.big)).parent(w).build(&mut ui.status)?;
     nwg::Label::builder().text("").position((20, 50)).size((420, 20)).parent(w).build(&mut ui.disk)?;
-    nwg::Label::builder().text("Screen / window:").position((20, 82)).size((108, 20)).parent(w).build(&mut ui.l_src)?;
+    nwg::Label::builder().text("Capture:").position((20, 82)).size((108, 20)).parent(w).build(&mut ui.l_src)?;
     nwg::ComboBox::builder().position((130, 78)).size((240, 24)).parent(w).build(&mut ui.src)?;
     nwg::Button::builder().text("Refresh").position((376, 77)).size((64, 26)).parent(w).build(&mut ui.refresh)?;
     nwg::Label::builder().text("Microphone:").position((20, 114)).size((108, 20)).parent(w).build(&mut ui.l_mic)?;
