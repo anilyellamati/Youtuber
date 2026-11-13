@@ -169,9 +169,8 @@ impl Recording {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let mut cmd = ffmpeg_raw();
-        cmd.args(["-thread_queue_size", "512"])
-            .args(&input)
-            .args(["-thread_queue_size", "4096", "-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &format!("tcp://127.0.0.1:{port}")])
+        cmd.args(&input)
+            .args(["-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &format!("tcp://127.0.0.1:{port}")])
             .args(["-map", "0:v", "-map", "1:a"])
             .args(&codec)
             .args(["-c:a", "aac", "-b:a", "160k"])
