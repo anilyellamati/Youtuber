@@ -2,7 +2,7 @@
 
 ## ⬇️ Download
 
-### [Download StreamForge Rec for Windows (64-bit) — StreamForgeRec-windows-x64.zip](https://github.com/anilyellamati/Youtuber/releases/download/rec-v1.0.0/StreamForgeRec-windows-x64.zip)
+### [Download StreamForge Rec for Windows (64-bit) — StreamForgeRec-windows-x64.zip](https://github.com/anilyellamati/Youtuber/releases/download/rec-v1.0.1/StreamForgeRec-windows-x64.zip)
 
 65 MB. Unzip anywhere and run `StreamForgeRec.exe` (keep `ffmpeg.exe` in the same folder). No installer needed.
 
@@ -10,11 +10,12 @@
 
 - A small native Windows window with no browser engine and no live preview; the window itself uses about 2 MB of memory.
 - Captures on the graphics card and encodes with its own encoder (NVIDIA, AMD or Intel), at below-normal priority so games keep the CPU.
-- Records computer sound and microphone. **F9** starts and stops from inside a game.
+- Dropdowns to choose what to record (any display or an open window), which microphone, and an optional camera shown in the bottom-right corner.
+- Records computer sound. **F9** starts and stops from inside a game.
 - Watches the disk and stops safely at 97% full.
 - Four exports: YouTube High, YouTube Low, Story 9:16 High, Story 9:16 Low.
 
-![StreamForge Rec](https://github.com/anilyellamati/Youtuber/releases/download/rec-v1.0.0/StreamForgeRec-screenshot.png)
+![StreamForge Rec](https://github.com/anilyellamati/Youtuber/releases/download/rec-v1.0.1/StreamForgeRec-screenshot.png)
 
 **First launch:** Windows SmartScreen may warn about an unknown publisher; click **More info** → **Run anyway**.
 
