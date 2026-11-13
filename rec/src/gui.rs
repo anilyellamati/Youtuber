@@ -56,32 +56,34 @@ enum Msg {
 
 fn build(ui: &mut Ui) -> Result<(), nwg::NwgError> {
     nwg::Font::builder().family("Segoe UI").size(26).weight(700).build(&mut ui.big)?;
+    // Sizes are logical pixels: the "high-dpi" feature scales them with the Windows
+    // display scaling setting, so text never outgrows its control.
     nwg::Window::builder()
-        .size((460, 462))
-        .position((320, 220))
+        .size((500, 496))
+        .position((300, 160))
         .title("StreamForge Rec")
         .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE | nwg::WindowFlags::MINIMIZE_BOX)
         .build(&mut ui.window)?;
     let w = &ui.window;
-    nwg::Label::builder().text("Starting…").position((20, 12)).size((420, 34)).font(Some(&ui.big)).parent(w).build(&mut ui.status)?;
-    nwg::Label::builder().text("").position((20, 50)).size((420, 20)).parent(w).build(&mut ui.disk)?;
-    nwg::Label::builder().text("Capture:").position((20, 82)).size((108, 20)).parent(w).build(&mut ui.l_src)?;
-    nwg::ComboBox::builder().position((130, 78)).size((240, 24)).parent(w).build(&mut ui.src)?;
-    nwg::Button::builder().text("Refresh").position((376, 77)).size((64, 26)).parent(w).build(&mut ui.refresh)?;
-    nwg::Label::builder().text("Microphone:").position((20, 114)).size((108, 20)).parent(w).build(&mut ui.l_mic)?;
-    nwg::ComboBox::builder().position((130, 110)).size((310, 24)).parent(w).build(&mut ui.mic)?;
-    nwg::Label::builder().text("Camera:").position((20, 146)).size((108, 20)).parent(w).build(&mut ui.l_cam)?;
-    nwg::ComboBox::builder().position((130, 142)).size((310, 24)).parent(w).build(&mut ui.cam)?;
-    nwg::CheckBox::builder().text("Record computer sound").position((20, 174)).size((300, 22)).check_state(nwg::CheckBoxState::Checked).parent(w).build(&mut ui.sys)?;
-    nwg::Button::builder().text("Start recording  (F9)").position((20, 202)).size((420, 48)).enabled(false).parent(w).build(&mut ui.rec)?;
-    nwg::Label::builder().text("Export for YouTube: record something first.").position((20, 264)).size((420, 20)).parent(w).build(&mut ui.last)?;
-    let spots = [(20, 290), (235, 290), (20, 330), (235, 330)];
+    nwg::Label::builder().text("Starting…").position((20, 14)).size((460, 38)).font(Some(&ui.big)).parent(w).build(&mut ui.status)?;
+    nwg::Label::builder().text("").position((20, 56)).size((460, 22)).parent(w).build(&mut ui.disk)?;
+    nwg::Label::builder().text("Capture:").position((20, 94)).size((110, 22)).parent(w).build(&mut ui.l_src)?;
+    nwg::ComboBox::builder().position((136, 90)).size((262, 28)).parent(w).build(&mut ui.src)?;
+    nwg::Button::builder().text("Refresh").position((406, 89)).size((74, 28)).parent(w).build(&mut ui.refresh)?;
+    nwg::Label::builder().text("Microphone:").position((20, 130)).size((110, 22)).parent(w).build(&mut ui.l_mic)?;
+    nwg::ComboBox::builder().position((136, 126)).size((344, 28)).parent(w).build(&mut ui.mic)?;
+    nwg::Label::builder().text("Camera:").position((20, 166)).size((110, 22)).parent(w).build(&mut ui.l_cam)?;
+    nwg::ComboBox::builder().position((136, 162)).size((344, 28)).parent(w).build(&mut ui.cam)?;
+    nwg::CheckBox::builder().text("Record computer sound").position((20, 200)).size((300, 24)).check_state(nwg::CheckBoxState::Checked).parent(w).build(&mut ui.sys)?;
+    nwg::Button::builder().text("Start recording  (F9)").position((20, 236)).size((460, 52)).enabled(false).parent(w).build(&mut ui.rec)?;
+    nwg::Label::builder().text("Export for YouTube: record something first.").position((20, 306)).size((460, 22)).parent(w).build(&mut ui.last)?;
+    let spots = [(20, 334), (254, 334), (20, 378), (254, 378)];
     for (i, b) in ui.exports.iter_mut().enumerate() {
-        nwg::Button::builder().text(PRESETS[i].label).position(spots[i]).size((205, 34)).enabled(false).parent(w).build(b)?;
+        nwg::Button::builder().text(PRESETS[i].label).position(spots[i]).size((226, 36)).enabled(false).parent(w).build(b)?;
     }
-    nwg::ProgressBar::builder().range(0..100).pos(0).position((20, 376)).size((420, 14)).parent(w).build(&mut ui.bar)?;
-    nwg::Button::builder().text("Open recordings folder").position((20, 402)).size((170, 28)).parent(w).build(&mut ui.folder)?;
-    nwg::Label::builder().text("").position((200, 407)).size((240, 20)).parent(w).build(&mut ui.engine)?;
+    nwg::ProgressBar::builder().range(0..100).pos(0).position((20, 426)).size((460, 14)).parent(w).build(&mut ui.bar)?;
+    nwg::Button::builder().text("Open recordings folder").position((20, 452)).size((190, 30)).parent(w).build(&mut ui.folder)?;
+    nwg::Label::builder().text("").position((222, 458)).size((258, 22)).parent(w).build(&mut ui.engine)?;
     nwg::AnimationTimer::builder().parent(w).interval(Duration::from_millis(500)).active(true).build(&mut ui.timer)?;
     Ok(())
 }

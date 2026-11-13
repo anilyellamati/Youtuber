@@ -1,6 +1,6 @@
 [package]
 name = "streamforge-rec"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 description = "StreamForge Rec - strict, lightweight screen recorder"
 
@@ -15,7 +15,7 @@ dirs = "5"
 fs2 = "0.4"
 
 [target.'cfg(windows)'.dependencies]
-native-windows-gui = { version = "1.0", default-features = false, features = ["progress-bar", "animation-timer", "combobox"] }
+native-windows-gui = { version = "1.0", default-features = false, features = ["progress-bar", "animation-timer", "combobox", "high-dpi"] }
 winapi = { version = "0.3", features = ["winuser", "windef", "minwindef"] }
 
 [target.'cfg(windows)'.build-dependencies]
