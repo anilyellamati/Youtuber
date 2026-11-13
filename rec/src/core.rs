@@ -133,6 +133,8 @@ pub struct Disk {
 }
 
 pub fn disk(dir: &Path) -> Option<Disk> {
+    // use the nearest existing folder so a not-yet-created output folder still reports
+    let dir = dir.ancestors().find(|p| p.exists())?;
     let total = fs2::total_space(dir).ok()?;
     let free = fs2::available_space(dir).ok()?;
     if total == 0 {
@@ -233,10 +235,10 @@ pub struct Preset {
 }
 
 pub const PRESETS: [Preset; 4] = [
-    Preset { id: "YouTube-High", label: "YouTube video - High quality", w: 1920, h: 1080, kbps: 10000 },
-    Preset { id: "YouTube-Low", label: "YouTube video - Low quality", w: 1280, h: 720, kbps: 3500 },
-    Preset { id: "Story-High", label: "YouTube Story (mobile) - High", w: 1080, h: 1920, kbps: 8000 },
-    Preset { id: "Story-Low", label: "YouTube Story (mobile) - Low", w: 720, h: 1280, kbps: 3000 },
+    Preset { id: "YouTube-High", label: "YouTube - High quality", w: 1920, h: 1080, kbps: 10000 },
+    Preset { id: "YouTube-Low", label: "YouTube - Low quality", w: 1280, h: 720, kbps: 3500 },
+    Preset { id: "Story-High", label: "Story 9:16 - High quality", w: 1080, h: 1920, kbps: 8000 },
+    Preset { id: "Story-Low", label: "Story 9:16 - Low quality", w: 720, h: 1280, kbps: 3000 },
 ];
 
 #[derive(Default)]

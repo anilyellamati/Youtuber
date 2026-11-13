@@ -56,7 +56,7 @@ fn build(ui: &mut Ui) -> Result<(), nwg::NwgError> {
     nwg::CheckBox::builder().text("Record computer sound").position((20, 78)).size((200, 22)).check_state(nwg::CheckBoxState::Checked).parent(w).build(&mut ui.sys)?;
     nwg::CheckBox::builder().text("Record microphone").position((240, 78)).size((200, 22)).check_state(nwg::CheckBoxState::Checked).parent(w).build(&mut ui.mic)?;
     nwg::Button::builder().text("Start recording  (F9)").position((20, 108)).size((420, 48)).enabled(false).parent(w).build(&mut ui.rec)?;
-    nwg::Label::builder().text("Export: record something first.").position((20, 172)).size((420, 20)).parent(w).build(&mut ui.last)?;
+    nwg::Label::builder().text("Export for YouTube: record something first.").position((20, 172)).size((420, 20)).parent(w).build(&mut ui.last)?;
     let spots = [(20, 198), (235, 198), (20, 238), (235, 238)];
     for (i, b) in ui.exports.iter_mut().enumerate() {
         nwg::Button::builder().text(PRESETS[i].label).position(spots[i]).size((205, 34)).enabled(false).parent(w).build(b)?;
@@ -98,7 +98,7 @@ fn finish_recording(ui: &Ui, st: &mut State) {
     if let Some(rec) = st.rec.take() {
         ui.status.set_text("Saving…");
         let (path, secs) = rec.stop();
-        ui.last.set_text(&format!("Export last recording ({}):", core::fmt_time(secs)));
+        ui.last.set_text(&format!("Export last recording ({}) for YouTube:", core::fmt_time(secs)));
         st.last = Some(path);
         ui.rec.set_text("Start recording  (F9)");
         ui.status.set_text("Ready");
@@ -164,7 +164,9 @@ fn tick(ui: &Ui, state: &RefCell<State>, detected: &Arc<Mutex<Option<Option<&'st
 
     let disk = core::disk(&st.dir);
     if let Some(d) = &disk {
-        ui.disk.set_text(&format!("Disk: {:.0}% used, {} free", d.used * 100.0, core::fmt_gb(d.free_bytes)));
+        ui.disk.set_text(&format!("Disk: {:.0}% used, {} free (stops at {:.0}%)", d.used * 100.0, core::fmt_gb(d.free_bytes), core::DISK_LIMIT * 100.0));
+    } else {
+        ui.disk.set_text("Disk: unknown");
     }
 
     if st.rec.is_some() {
