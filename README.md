@@ -2,7 +2,7 @@
 
 ## ⬇️ Download
 
-### [Download StreamForge Rec for Windows (64-bit) — StreamForgeRec-windows-x64.zip](https://github.com/anilyellamati/Youtuber/releases/download/rec-v1.0.1/StreamForgeRec-windows-x64.zip)
+### [Download StreamForge Rec for Windows (64-bit) — StreamForgeRec-windows-x64.zip](https://github.com/anilyellamati/Youtuber/releases/download/rec-v1.0.2/StreamForgeRec-windows-x64.zip)
 
 65 MB. Unzip anywhere and run `StreamForgeRec.exe` (keep `ffmpeg.exe` in the same folder). No installer needed.
 
@@ -15,7 +15,7 @@
 - Watches the disk and stops safely at 97% full.
 - Four exports: YouTube High, YouTube Low, Story 9:16 High, Story 9:16 Low.
 
-![StreamForge Rec](https://github.com/anilyellamati/Youtuber/releases/download/rec-v1.0.1/StreamForgeRec-screenshot.png)
+![StreamForge Rec](https://github.com/anilyellamati/Youtuber/releases/download/rec-v1.0.2/StreamForgeRec-screenshot.png)
 
 **First launch:** Windows SmartScreen may warn about an unknown publisher; click **More info** → **Run anyway**.
 
