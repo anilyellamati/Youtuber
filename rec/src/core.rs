@@ -255,7 +255,12 @@ impl Recording {
         cmd.args(["-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &format!("tcp://127.0.0.1:{port}")]);
         if cam.is_some() {
             // camera: about a quarter of the frame height, bottom-right corner
-            cmd.args(["-filter_complex", &format!("[0:v]split[scr][ref];[1:v][ref]scale=-2:rh/4[cam];[scr][cam]overlay=W-w-24:H-h-24,{EVEN}[v]"), "-map", "[v]"]);
+            // The camera's clock (system time) is rebased to zero like the screen's; left
+            // as is, the overlay stalls waiting on mismatched timestamps and drops
+            // almost every frame.
+            let screen_h = src.region.or(src.virt).map(|r| r.3).unwrap_or(1080);
+            let cam_h = (screen_h / 4).max(120) & !1;
+            cmd.args(["-filter_complex", &format!("[1:v]setpts=PTS-STARTPTS,scale=-2:{cam_h}[cam];[0:v][cam]overlay=W-w-24:H-h-24:eof_action=pass,{EVEN}[v]"), "-map", "[v]"]);
         } else {
             if kind == "x264-gdi" {
                 cmd.args(["-vf", EVEN]);
