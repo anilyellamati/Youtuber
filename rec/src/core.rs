@@ -28,7 +28,7 @@ pub fn ffmpeg_path() -> PathBuf {
     PathBuf::from(exe)
 }
 
-/// FFmpeg child that never opens a console window and yields the CPU to games.
+/// FFmpeg child that never opens a console window.
 fn ffmpeg() -> Command {
     let mut cmd = ffmpeg_raw();
     cmd.arg("-nostdin");
@@ -41,8 +41,10 @@ fn ffmpeg_raw() -> Command {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
-        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+        // Normal priority on purpose. At below-normal priority a game that keeps every
+        // CPU core busy starves ffmpeg almost completely: it takes tens of seconds to
+        // start and then captures only a few frames a minute.
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd.args(["-hide_banner", "-loglevel", "warning", "-y"]);
     cmd
@@ -327,8 +329,8 @@ impl Recording {
     pub fn stalled(&self) -> bool {
         let secs = self.started.elapsed().as_secs_f64();
         match self.path.metadata() {
-            Err(_) => secs >= 8.0,
-            Ok(m) => m.len() == 0 && secs >= 20.0,
+            Err(_) => secs >= 30.0,
+            Ok(m) => m.len() == 0 && secs >= 45.0,
         }
     }
 
