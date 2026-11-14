@@ -78,7 +78,78 @@ fn open(device: cpal::Device, config: cpal::SupportedStreamConfig, queue: Queue)
     Some(stream)
 }
 
-pub fn spawn_mixer(listener: TcpListener, stop: Arc<AtomicBool>, system_sound: bool, mic: Option<String>) -> std::thread::JoinHandle<()> {
+/// The channel that carries mixed audio to ffmpeg. On Windows this is a named pipe:
+/// no networking is involved, so firewalls and antivirus cannot block or delay it.
+/// Elsewhere (development) it is a loopback socket.
+pub enum Sink {
+    #[cfg_attr(windows, allow(dead_code))]
+    Tcp(TcpListener),
+    #[cfg(windows)]
+    Pipe(isize),
+}
+
+impl Sink {
+    /// Creates the channel and returns it with the input URL to give ffmpeg.
+    /// Must be called before ffmpeg starts so the endpoint already exists.
+    pub fn create() -> Result<(Sink, String), String> {
+        #[cfg(windows)]
+        {
+            use winapi::um::handleapi::INVALID_HANDLE_VALUE;
+            use winapi::um::namedpipeapi::CreateNamedPipeW;
+            use winapi::um::winbase::{PIPE_ACCESS_OUTBOUND, PIPE_TYPE_BYTE, PIPE_WAIT};
+            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+            let path = format!(r"\\.\pipe\sfrec-audio-{}-{}", std::process::id(), nanos);
+            let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+            let h = unsafe { CreateNamedPipeW(wide.as_ptr(), PIPE_ACCESS_OUTBOUND, PIPE_TYPE_BYTE | PIPE_WAIT, 1, 1 << 20, 0, 0, std::ptr::null_mut()) };
+            if h == INVALID_HANDLE_VALUE {
+                return Err("Could not create the audio pipe".into());
+            }
+            return Ok((Sink::Pipe(h as isize), path));
+        }
+        #[cfg(not(windows))]
+        {
+            let l = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+            let port = l.local_addr().map_err(|e| e.to_string())?.port();
+            Ok((Sink::Tcp(l), format!("tcp://127.0.0.1:{port}")))
+        }
+    }
+
+    /// Waits for ffmpeg to open the channel.
+    fn connect(self, stop: &AtomicBool) -> Option<Box<dyn Write>> {
+        match self {
+            Sink::Tcp(listener) => {
+                let _ = listener.set_nonblocking(true);
+                let wait = Instant::now();
+                loop {
+                    match listener.accept() {
+                        Ok((sock, _)) => {
+                            let _ = sock.set_nonblocking(false);
+                            let _ = sock.set_nodelay(true);
+                            return Some(Box::new(sock));
+                        }
+                        Err(_) if wait.elapsed() < Duration::from_secs(60) && !stop.load(Ordering::SeqCst) => std::thread::sleep(Duration::from_millis(10)),
+                        Err(_) => return None,
+                    }
+                }
+            }
+            #[cfg(windows)]
+            Sink::Pipe(h) => {
+                use std::os::windows::io::FromRawHandle;
+                use winapi::um::errhandlingapi::GetLastError;
+                use winapi::um::namedpipeapi::ConnectNamedPipe;
+                const ERROR_PIPE_CONNECTED: u32 = 535;
+                let h = h as winapi::um::winnt::HANDLE;
+                // Blocks until ffmpeg opens the pipe. Recording::stop opens it itself to
+                // release this wait if ffmpeg never got that far.
+                let ok = unsafe { ConnectNamedPipe(h, std::ptr::null_mut()) != 0 || GetLastError() == ERROR_PIPE_CONNECTED };
+                let file = unsafe { std::fs::File::from_raw_handle(h as _) };
+                (ok && !stop.load(Ordering::SeqCst)).then(|| Box::new(file) as Box<dyn Write>)
+            }
+        }
+    }
+}
+
+pub fn spawn_mixer(sink: Sink, stop: Arc<AtomicBool>, system_sound: bool, mic: Option<String>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let host = cpal::default_host();
         let mut sources: Vec<(Queue, cpal::Stream)> = Vec::new();
@@ -110,17 +181,7 @@ pub fn spawn_mixer(listener: TcpListener, stop: Arc<AtomicBool>, system_sound: b
         }
 
         // ffmpeg connects once it opens its inputs
-        let _ = listener.set_nonblocking(true);
-        let wait = Instant::now();
-        let mut pipe = loop {
-            match listener.accept() {
-                Ok((sock, _)) => break sock,
-                Err(_) if wait.elapsed() < Duration::from_secs(15) && !stop.load(Ordering::SeqCst) => std::thread::sleep(Duration::from_millis(10)),
-                Err(_) => return,
-            }
-        };
-        let _ = pipe.set_nonblocking(false);
-        let _ = pipe.set_nodelay(true);
+        let Some(mut pipe) = sink.connect(&stop) else { return };
 
         let start = Instant::now();
         let mut written: u64 = 0; // frames

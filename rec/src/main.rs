@@ -53,7 +53,13 @@ fn selftest(secs: u64) -> i32 {
     let (path, _) = rec.stop();
     let size = path.metadata().map(|m| m.len()).unwrap_or(0);
     let dur = core::duration(&path);
-    say(format!("recording: {} bytes, duration {:?}", size, dur));
+    let frames = core::frame_count(&path);
+    say(format!("recording: {} bytes, duration {:?}, frames {:?}", size, dur, frames));
+    // a healthy recording holds roughly 24-30 frames for every second
+    if frames.map(|f| (f as f64) < secs as f64 * 15.0).unwrap_or(true) {
+        say("FAIL: recording is missing most of its frames".into());
+        return 1;
+    }
     let mut code = 0;
     if size < 10_000 || dur.map(|d| d < secs as f64 * 0.5).unwrap_or(true) {
         say("FAIL: recording too small or too short".into());

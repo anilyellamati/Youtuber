@@ -231,6 +231,7 @@ pub struct Recording {
     pub path: PathBuf,
     pub started: Instant,
     log: Arc<Mutex<String>>,
+    audio_url: String,
 }
 
 impl Recording {
@@ -241,18 +242,17 @@ impl Recording {
         let path = dir.join(name);
         let cam = camera.filter(|c| !c.is_empty());
         let software = cam.is_some();
-        // Audio reaches ffmpeg over a loopback socket as raw PCM mixed by this process;
+        // Audio reaches ffmpeg through a private pipe as raw PCM mixed by this process;
         // stdin stays free for the "q" (finish file) command. `-shortest` is avoided:
         // with a live audio input it stalls the video stream in FFmpeg 8.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
-        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+        let (sink, audio_url) = crate::audio::Sink::create()?;
         let mut cmd = ffmpeg_raw();
         cmd.args(video_input(kind, src, software));
         if let Some(cam) = &cam {
             cmd.args(["-f", "dshow", "-rtbufsize", "64M", "-i", &format!("video={cam}")]);
         }
         let audio_idx = if cam.is_some() { 2 } else { 1 };
-        cmd.args(["-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &format!("tcp://127.0.0.1:{port}")]);
+        cmd.args(["-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &audio_url]);
         if cam.is_some() {
             // camera: about a quarter of the frame height, bottom-right corner
             // The camera's clock (system time) is rebased to zero like the screen's; left
@@ -274,19 +274,23 @@ impl Recording {
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
+        let cmdline = format!("{cmd:?}");
+        let log_path = dir.join("last-recording-log.txt");
         let mut child = cmd.spawn().map_err(|e| format!("Could not start the recorder (ffmpeg): {e}"))?;
         let stop = Arc::new(AtomicBool::new(false));
-        let audio = crate::audio::spawn_mixer(listener, stop.clone(), system_sound, mic);
+        let audio = crate::audio::spawn_mixer(sink, stop.clone(), system_sound, mic);
         let log = Arc::new(Mutex::new(String::new()));
         if let Some(mut err) = child.stderr.take() {
             let log = log.clone();
             std::thread::spawn(move || {
                 let mut buf = String::new();
                 let _ = err.read_to_string(&mut buf);
+                // kept on disk so a failed recording can be diagnosed from one file
+                let _ = std::fs::write(&log_path, format!("StreamForge Rec {}\n{cmdline}\n\n{buf}", env!("CARGO_PKG_VERSION")));
                 *log.lock().unwrap() = buf;
             });
         }
-        Ok(Recording { child, stop, audio: Some(audio), path, started: Instant::now(), log })
+        Ok(Recording { child, stop, audio: Some(audio), path, started: Instant::now(), log, audio_url })
     }
 
     /// False once ffmpeg has exited on its own (capture failure).
@@ -309,6 +313,11 @@ impl Recording {
             let _ = stdin.flush();
         }
         self.stop.store(true, Ordering::SeqCst);
+        // If ffmpeg never opened the audio pipe, the mixer is still waiting for it:
+        // opening the pipe ourselves releases that wait. (No effect once connected.)
+        if cfg!(windows) {
+            let _ = std::fs::File::open(&self.audio_url);
+        }
         if let Some(a) = self.audio.take() {
             let _ = a.join();
         }
@@ -402,6 +411,14 @@ fn run_copy(master: &Path, p: &Preset, state: &Arc<Mutex<ExportState>>) -> Resul
         let _ = std::fs::remove_file(&out);
         Err(String::from_utf8_lossy(&res.stderr).lines().rev().take(2).collect::<Vec<_>>().join(" "))
     }
+}
+
+/// Number of video frames actually stored in a file (decodes it once).
+pub fn frame_count(path: &Path) -> Option<u64> {
+    let out = ffmpeg().args(["-loglevel", "info", "-i"]).arg(path).args(["-map", "0:v", "-f", "null", "-"]).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stderr).replace('\r', "\n");
+    let line = text.lines().rev().find(|l| l.starts_with("frame="))?;
+    line["frame=".len()..].split_whitespace().next()?.parse().ok()
 }
 
 pub fn export_path(master: &Path, p: &Preset) -> PathBuf {

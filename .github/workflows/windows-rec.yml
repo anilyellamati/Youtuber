@@ -39,10 +39,10 @@ jobs:
           "App exe: {0:N2} MB" -f ((Get-Item out/StreamForgeRec/StreamForgeRec.exe).Length / 1MB)
           "ffmpeg:  {0:N0} MB" -f ((Get-Item out/StreamForgeRec/ffmpeg.exe).Length / 1MB)
 
-      - name: Self-test (record 6 s, export 4 presets)
+      - name: Self-test (record 40 s, export 4 presets)
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath (Resolve-Path out/StreamForgeRec/StreamForgeRec.exe) -ArgumentList "--selftest","6" -WorkingDirectory out -Wait -PassThru
+          $p = Start-Process -FilePath (Resolve-Path out/StreamForgeRec/StreamForgeRec.exe) -ArgumentList "--selftest","40" -WorkingDirectory out -Wait -PassThru
           Get-Content out/selftest.log
           if ($p.ExitCode -ne 0) { exit 1 }
 
