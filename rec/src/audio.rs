@@ -85,7 +85,7 @@ pub enum Sink {
     #[cfg_attr(windows, allow(dead_code))]
     Tcp(TcpListener),
     #[cfg(windows)]
-    Pipe(isize),
+    Pipe(std::fs::File),
 }
 
 impl Sink {
@@ -104,7 +104,10 @@ impl Sink {
             if h == INVALID_HANDLE_VALUE {
                 return Err("Could not create the audio pipe".into());
             }
-            return Ok((Sink::Pipe(h as isize), path));
+            // Owned as a File from the start: whatever happens to the mixer, the pipe is
+            // closed when it is dropped, so ffmpeg can never be left waiting on it.
+            use std::os::windows::io::FromRawHandle;
+            return Ok((Sink::Pipe(unsafe { std::fs::File::from_raw_handle(h as _) }), path));
         }
         #[cfg(not(windows))]
         {
@@ -133,34 +136,47 @@ impl Sink {
                 }
             }
             #[cfg(windows)]
-            Sink::Pipe(h) => {
-                use std::os::windows::io::FromRawHandle;
+            Sink::Pipe(file) => {
+                use std::os::windows::io::AsRawHandle;
                 use winapi::um::errhandlingapi::GetLastError;
                 use winapi::um::namedpipeapi::ConnectNamedPipe;
                 const ERROR_PIPE_CONNECTED: u32 = 535;
-                let h = h as winapi::um::winnt::HANDLE;
+                let h = file.as_raw_handle() as winapi::um::winnt::HANDLE;
                 // Blocks until ffmpeg opens the pipe. Recording::stop opens it itself to
                 // release this wait if ffmpeg never got that far.
                 let ok = unsafe { ConnectNamedPipe(h, std::ptr::null_mut()) != 0 || GetLastError() == ERROR_PIPE_CONNECTED };
-                let file = unsafe { std::fs::File::from_raw_handle(h as _) };
                 (ok && !stop.load(Ordering::SeqCst)).then(|| Box::new(file) as Box<dyn Write>)
             }
         }
     }
 }
 
-pub fn spawn_mixer(sink: Sink, stop: Arc<AtomicBool>, system_sound: bool, mic: Option<String>) -> std::thread::JoinHandle<()> {
+/// Opens the sound devices on a thread of its own and keeps them running until
+/// `stop`. Some audio drivers take very long (or forever) to open; that must never
+/// hold up the recording, so the mixer does not wait for this thread.
+fn spawn_devices(queues: Arc<Mutex<Vec<Queue>>>, stop: Arc<AtomicBool>, system_sound: bool, mic: Option<String>) {
     std::thread::spawn(move || {
+        if std::env::var_os("SFREC_TEST_AUDIO_HANG").is_some() {
+            // test hook: behave like a driver that never answers
+            while !stop.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            return;
+        }
         let host = cpal::default_host();
-        let mut sources: Vec<(Queue, cpal::Stream)> = Vec::new();
+        let mut streams: Vec<cpal::Stream> = Vec::new();
+        let mut add = |dev: cpal::Device, cfg: cpal::SupportedStreamConfig| {
+            let q: Queue = Default::default();
+            if let Some(s) = open(dev, cfg, q.clone()) {
+                queues.lock().unwrap().push(q);
+                streams.push(s);
+            }
+        };
         if system_sound {
             // On Windows (WASAPI) an input stream on the output device is a loopback capture.
             if let Some(dev) = host.default_output_device() {
                 if let Ok(cfg) = dev.default_output_config() {
-                    let q: Queue = Default::default();
-                    if let Some(s) = open(dev, cfg, q.clone()) {
-                        sources.push((q, s));
-                    }
+                    add(dev, cfg);
                 }
             }
         }
@@ -172,16 +188,26 @@ pub fn spawn_mixer(sink: Sink, stop: Arc<AtomicBool>, system_sound: bool, mic: O
             };
             if let Some(dev) = chosen.or_else(|| host.default_input_device()) {
                 if let Ok(cfg) = dev.default_input_config() {
-                    let q: Queue = Default::default();
-                    if let Some(s) = open(dev, cfg, q.clone()) {
-                        sources.push((q, s));
-                    }
+                    add(dev, cfg);
                 }
             }
         }
+        while !stop.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        drop(streams);
+    });
+}
 
-        // ffmpeg connects once it opens its inputs
+pub fn spawn_mixer(sink: Sink, stop: Arc<AtomicBool>, system_sound: bool, mic: Option<String>) -> std::thread::JoinHandle<()> {
+    let queues: Arc<Mutex<Vec<Queue>>> = Default::default();
+    spawn_devices(queues.clone(), stop.clone(), system_sound, mic);
+    std::thread::spawn(move || {
+        // ffmpeg connects once it opens its inputs; it gets sound (or silence) at once
         let Some(mut pipe) = sink.connect(&stop) else { return };
+        for q in queues.lock().unwrap().iter() {
+            q.lock().unwrap().clear(); // drop sound captured before the recording began
+        }
 
         let start = Instant::now();
         let mut written: u64 = 0; // frames
@@ -194,7 +220,7 @@ pub fn spawn_mixer(sink: Sink, stop: Arc<AtomicBool>, system_sound: bool, mic: O
                 continue;
             }
             let mut mix = vec![0f32; n * 2];
-            for (q, _) in &sources {
+            for q in queues.lock().unwrap().iter() {
                 let mut q = q.lock().unwrap();
                 for m in mix.iter_mut() {
                     match q.pop_front() {

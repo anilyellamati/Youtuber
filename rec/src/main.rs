@@ -36,7 +36,9 @@ fn selftest(secs: u64) -> i32 {
     if let Some(d) = core::disk(&dir) {
         say(format!("disk: {:.1}% used, {} free", d.used * 100.0, core::fmt_gb(d.free_bytes)));
     }
-    let mut rec = match core::Recording::start(&dir, kind, &core::Source::default(), true, Some(String::new()), None) {
+    // SFREC_TEST_SILENT exercises the picture-only fallback
+    let with_audio = std::env::var_os("SFREC_TEST_SILENT").is_none();
+    let mut rec = match core::Recording::start(&dir, kind, &core::Source::default(), with_audio, true, Some(String::new()), None) {
         Ok(r) => r,
         Err(e) => {
             say(format!("FAIL: {e}"));
@@ -49,8 +51,17 @@ fn selftest(secs: u64) -> i32 {
             say(format!("FAIL: recorder exited early: {}", rec.error_log()));
             return 1;
         }
+        if rec.stalled() {
+            say("FAIL: recorder is running but nothing reaches the file".into());
+            rec.abort();
+            return 1;
+        }
     }
     let (path, _) = rec.stop();
+    let Some(path) = path else {
+        say("FAIL: no recording file was produced".into());
+        return 1;
+    };
     let size = path.metadata().map(|m| m.len()).unwrap_or(0);
     let dur = core::duration(&path);
     let frames = core::frame_count(&path);

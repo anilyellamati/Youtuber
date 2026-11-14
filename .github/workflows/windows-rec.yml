@@ -46,6 +46,21 @@ jobs:
           Get-Content out/selftest.log
           if ($p.ExitCode -ne 0) { exit 1 }
 
+      - name: Self-test with a sound device that never answers, and picture-only
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path out/StreamForgeRec/StreamForgeRec.exe
+          $env:SFREC_TEST_AUDIO_HANG = "1"
+          $p = Start-Process -FilePath $exe -ArgumentList "--selftest","25" -WorkingDirectory out -Wait -PassThru
+          Get-Content out/selftest.log
+          if ($p.ExitCode -ne 0) { exit 1 }
+          Remove-Item Env:SFREC_TEST_AUDIO_HANG
+          $env:SFREC_TEST_SILENT = "1"
+          $p = Start-Process -FilePath $exe -ArgumentList "--selftest","25" -WorkingDirectory out -Wait -PassThru
+          Get-Content out/selftest.log
+          if ($p.ExitCode -ne 0) { exit 1 }
+          Remove-Item Env:SFREC_TEST_SILENT
+
       - name: Launch window and take screenshot
         shell: pwsh
         run: |

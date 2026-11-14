@@ -234,10 +234,17 @@ pub struct Recording {
     audio_url: String,
 }
 
+/// Why a recording produced nothing, for the user. Points at the log file.
+pub fn failure_help(dir: &Path) -> String {
+    format!("Nothing was recorded.\n\nPlease send this file so it can be fixed:\n{}", dir.join("last-recording-log.txt").display())
+}
+
 impl Recording {
     /// `mic`: None = off, Some("") = default device, Some(name) = that device.
     /// `camera`: a DirectShow camera shown as a small picture in the bottom-right corner.
-    pub fn start(dir: &Path, kind: &str, src: &Source, system_sound: bool, mic: Option<String>, camera: Option<String>) -> Result<Recording, String> {
+    /// `with_audio` false records the picture only (used when sound cannot be delivered).
+    pub fn start(dir: &Path, kind: &str, src: &Source, with_audio: bool, system_sound: bool, mic: Option<String>, camera: Option<String>) -> Result<Recording, String> {
+        let _ = std::fs::create_dir_all(dir);
         let name = chrono::Local::now().format("Rec_%Y-%m-%d_%H-%M-%S.mkv").to_string();
         let path = dir.join(name);
         let cam = camera.filter(|c| !c.is_empty());
@@ -245,14 +252,21 @@ impl Recording {
         // Audio reaches ffmpeg through a private pipe as raw PCM mixed by this process;
         // stdin stays free for the "q" (finish file) command. `-shortest` is avoided:
         // with a live audio input it stalls the video stream in FFmpeg 8.
-        let (sink, audio_url) = crate::audio::Sink::create()?;
+        let (sink, audio_url) = if with_audio {
+            let (s, u) = crate::audio::Sink::create()?;
+            (Some(s), u)
+        } else {
+            (None, String::new())
+        };
         let mut cmd = ffmpeg_raw();
         cmd.args(video_input(kind, src, software));
         if let Some(cam) = &cam {
             cmd.args(["-f", "dshow", "-rtbufsize", "64M", "-i", &format!("video={cam}")]);
         }
         let audio_idx = if cam.is_some() { 2 } else { 1 };
-        cmd.args(["-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &audio_url]);
+        if with_audio {
+            cmd.args(["-probesize", "32", "-analyzeduration", "0", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", &audio_url]);
+        }
         if cam.is_some() {
             // camera: about a quarter of the frame height, bottom-right corner
             // The camera's clock (system time) is rebased to zero like the screen's; left
@@ -267,9 +281,10 @@ impl Recording {
             }
             cmd.args(["-map", "0:v"]);
         }
-        cmd.args(["-map", &format!("{audio_idx}:a")])
-            .args(video_codec(kind, software))
-            .args(["-c:a", "aac", "-b:a", "160k"])
+        if with_audio {
+            cmd.args(["-map", &format!("{audio_idx}:a"), "-c:a", "aac", "-b:a", "160k"]);
+        }
+        cmd.args(video_codec(kind, software))
             .arg(&path)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -278,7 +293,7 @@ impl Recording {
         let log_path = dir.join("last-recording-log.txt");
         let mut child = cmd.spawn().map_err(|e| format!("Could not start the recorder (ffmpeg): {e}"))?;
         let stop = Arc::new(AtomicBool::new(false));
-        let audio = crate::audio::spawn_mixer(sink, stop.clone(), system_sound, mic);
+        let audio = sink.map(|sink| crate::audio::spawn_mixer(sink, stop.clone(), system_sound, mic));
         let log = Arc::new(Mutex::new(String::new()));
         if let Some(mut err) = child.stderr.take() {
             let log = log.clone();
@@ -290,7 +305,7 @@ impl Recording {
                 *log.lock().unwrap() = buf;
             });
         }
-        Ok(Recording { child, stop, audio: Some(audio), path, started: Instant::now(), log, audio_url })
+        Ok(Recording { child, stop, audio, path, started: Instant::now(), log, audio_url })
     }
 
     /// False once ffmpeg has exited on its own (capture failure).
@@ -303,9 +318,40 @@ impl Recording {
         l.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" ")
     }
 
+    pub fn has_audio(&self) -> bool {
+        !self.audio_url.is_empty()
+    }
+
+    /// True when the recorder is running but nothing is reaching the file: ffmpeg
+    /// creates the file once all inputs are open and adds data every few seconds.
+    pub fn stalled(&self) -> bool {
+        let secs = self.started.elapsed().as_secs_f64();
+        match self.path.metadata() {
+            Err(_) => secs >= 8.0,
+            Ok(m) => m.len() == 0 && secs >= 20.0,
+        }
+    }
+
+    /// Ends a recording that produced nothing, without waiting, and removes the empty file.
+    pub fn abort(mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if cfg!(windows) && self.has_audio() {
+            let _ = std::fs::File::open(&self.audio_url);
+        }
+        if let Some(a) = self.audio.take() {
+            let _ = a.join();
+        }
+        if self.path.metadata().map(|m| m.len() < 1000).unwrap_or(false) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
     /// Asks ffmpeg to finish the file ("q"), then ends the audio stream.
     /// MKV stays playable even if ffmpeg has to be killed.
-    pub fn stop(mut self) -> (PathBuf, f64) {
+    /// The path is None when no usable file was produced.
+    pub fn stop(mut self) -> (Option<PathBuf>, f64) {
         use std::io::Write;
         let secs = self.started.elapsed().as_secs_f64();
         if let Some(mut stdin) = self.child.stdin.take() {
@@ -315,14 +361,18 @@ impl Recording {
         self.stop.store(true, Ordering::SeqCst);
         // If ffmpeg never opened the audio pipe, the mixer is still waiting for it:
         // opening the pipe ourselves releases that wait. (No effect once connected.)
-        if cfg!(windows) {
+        if cfg!(windows) && self.has_audio() {
             let _ = std::fs::File::open(&self.audio_url);
         }
         if let Some(a) = self.audio.take() {
             let _ = a.join();
         }
         let _ = wait_timeout(&mut self.child, Duration::from_secs(10));
-        (self.path.clone(), secs)
+        let ok = self.path.metadata().map(|m| m.len() >= 1000).unwrap_or(false);
+        if !ok {
+            let _ = std::fs::remove_file(&self.path);
+        }
+        (ok.then(|| self.path.clone()), secs)
     }
 }
 

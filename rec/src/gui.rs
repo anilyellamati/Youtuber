@@ -44,6 +44,8 @@ struct State {
     cams: Vec<String>,
     rec: Option<Recording>,
     last: Option<PathBuf>,
+    /// What the running recording captures, kept so it can be restarted without sound.
+    retry: Option<(core::Source, Option<String>)>,
     export: Option<(Arc<Mutex<ExportState>>, &'static str)>,
 }
 
@@ -163,24 +165,36 @@ fn disk_full_msg(used: f64) -> String {
     )
 }
 
-fn finish_recording(ui: &Ui, st: &mut State) {
-    if let Some(rec) = st.rec.take() {
-        ui.status.set_text("Saving…");
-        let (path, secs) = rec.stop();
-        ui.last.set_text(&format!("Export last recording ({}) for YouTube:", core::fmt_time(secs)));
-        st.last = Some(path);
-        ui.rec.set_text("Start recording  (F9)");
-        ui.status.set_text("Ready");
-        set_inputs(ui, true);
-        set_exports(ui, true);
-    }
+fn idle(ui: &Ui, st: &State) {
+    ui.rec.set_text("Start recording  (F9)");
+    ui.status.set_text("Ready");
+    set_inputs(ui, true);
+    set_exports(ui, st.last.is_some());
+}
+
+/// Stops and saves. Returns a message when there is something the user must know.
+fn finish_recording(ui: &Ui, st: &mut State) -> Option<Msg> {
+    let rec = st.rec.take()?;
+    ui.status.set_text("Saving…");
+    let silent = !rec.has_audio();
+    let (path, secs) = rec.stop();
+    st.retry = None;
+    let msg = match path {
+        Some(path) => {
+            ui.last.set_text(&format!("Export last recording ({}) for YouTube:", core::fmt_time(secs)));
+            st.last = Some(path);
+            silent.then(|| Msg::Info("Recording saved, but WITHOUT SOUND: the sound device did not respond.\n\nTry another microphone in the list, or untick computer sound.".into()))
+        }
+        None => Some(Msg::Error(core::failure_help(&st.dir))),
+    };
+    idle(ui, st);
+    msg
 }
 
 fn toggle(ui: &Ui, state: &RefCell<State>) -> Option<Msg> {
     let mut st = state.try_borrow_mut().ok()?;
     if st.rec.is_some() {
-        finish_recording(ui, &mut st);
-        return None;
+        return finish_recording(ui, &mut st);
     }
     let kind = st.strategy?;
     if st.export.is_some() {
@@ -203,9 +217,10 @@ fn toggle(ui: &Ui, state: &RefCell<State>) -> Option<Msg> {
         i => st.cams.get(i - 1).cloned(),
     };
     let src = st.sources.get(ui.src.selection().unwrap_or(0)).cloned().unwrap_or_default();
-    match Recording::start(&st.dir, kind, &src, sys, mic, cam) {
+    match Recording::start(&st.dir, kind, &src, true, sys, mic, cam.clone()) {
         Ok(rec) => {
             st.rec = Some(rec);
+            st.retry = Some((src, cam));
             ui.rec.set_text("Stop recording  (F9)");
             set_inputs(ui, false);
             set_exports(ui, false);
@@ -250,10 +265,30 @@ fn tick(ui: &Ui, state: &RefCell<State>, detected: &Detected) -> Option<Msg> {
     if st.rec.is_some() {
         let alive = st.rec.as_mut().map(|r| r.alive()).unwrap_or(false);
         let secs = st.rec.as_ref().map(|r| r.started.elapsed().as_secs_f64()).unwrap_or(0.0);
+        let stalled = st.rec.as_ref().map(|r| r.stalled()).unwrap_or(false);
         if !alive {
             let log = st.rec.as_ref().map(|r| r.error_log()).unwrap_or_default();
             finish_recording(ui, &mut st);
             msg = Some(Msg::Error(format!("Recording stopped unexpectedly after {}.\n\n{log}", core::fmt_time(secs))));
+        } else if stalled {
+            // Nothing is reaching the file. If sound is the reason, carry on with the
+            // picture alone rather than lose the recording; otherwise stop and say so.
+            let had_audio = st.rec.as_ref().map(|r| r.has_audio()).unwrap_or(false);
+            if let Some(rec) = st.rec.take() {
+                rec.abort();
+            }
+            let again = match (had_audio, st.strategy, st.retry.clone()) {
+                (true, Some(kind), Some((src, cam))) => Recording::start(&st.dir, kind, &src, false, false, None, cam).ok(),
+                _ => None,
+            };
+            match again {
+                Some(rec) => st.rec = Some(rec),
+                None => {
+                    st.retry = None;
+                    idle(ui, &st);
+                    msg = Some(Msg::Error(core::failure_help(&st.dir)));
+                }
+            }
         } else if disk.as_ref().map(|d| d.used >= core::DISK_LIMIT).unwrap_or(false) {
             finish_recording(ui, &mut st);
             msg = Some(Msg::Error(format!("Recording was stopped and saved.\n\n{}", disk_full_msg(disk.map(|d| d.used).unwrap_or(1.0)))));
@@ -310,7 +345,7 @@ pub fn run() {
     build(&mut ui).expect("window");
     let ui = Rc::new(ui);
 
-    let state = Rc::new(RefCell::new(State { dir: core::output_dir(), strategy: None, detecting: true, sources: Vec::new(), mics: Vec::new(), cams: Vec::new(), rec: None, last: None, export: None }));
+    let state = Rc::new(RefCell::new(State { dir: core::output_dir(), strategy: None, detecting: true, sources: Vec::new(), mics: Vec::new(), cams: Vec::new(), rec: None, last: None, export: None, retry: None }));
 
     {
         let mut st = state.borrow_mut();
