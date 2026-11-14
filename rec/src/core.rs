@@ -1,5 +1,5 @@
 //! Recording and export engine. FFmpeg does the heavy lifting in a separate,
-//! below-normal-priority process: GPU desktop duplication feeds the GPU's own
+//! process: GPU desktop duplication feeds the GPU's own
 //! encoder, so a running game keeps the CPU. This process only supervises.
 
 use std::io::{BufRead, BufReader, Read};
